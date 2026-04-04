@@ -10,6 +10,38 @@ Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
 
 ---
 
+## [0.6.0] 2026-04-05
+
+### Added
+- `/config` device page: editable NAS server URL (saved to NVS) and live
+  system stats (uptime, firmware build, WiFi SSID/IP/RSSI/MAC, hostname, free
+  heap, max alloc block, last-fetch age, chip info). Auto-refreshes every 10s.
+- `GET /api/config` — returns system stats + current NAS URL as JSON.
+- `POST /api/config` — updates the NAS URL (validated, persisted to NVS).
+- Hour formatting on WebUI: departures >=60 min now render as `1h5m` / `2h` to
+  match the TFT and server dashboard formats.
+
+### Changed
+- WebUI dashboard footer now links to `/config` instead of directly to raw JSON
+  (JSON link moved to the config page footer).
+- Server status dot on TFT now sits to the right of the "Server Status" label
+  instead of overlapping the middle of the text.
+- Shrank `/api/state` JSON buffer from `StaticJsonDocument<3072>` to `<2048>`;
+  actual payload is ~1.2 KB.
+
+### Removed
+- Dead `/mirror` redirect route and `handleMirror()` handler.
+- No-op `handleWebServer()` called from every main-loop iteration.
+- Unused `-DLOAD_GFXFF=1` and `-DSMOOTH_FONT=1` TFT_eSPI build flags — the
+  project only uses GLCD Font 2/4. Saves ~11 KB flash.
+- Stale "Phase 2" / "Phase 3" comments in `time_mgr.cpp` and `web_server.cpp`.
+
+### Fixed
+- WebUI rendered blank when any departure was >=60 min away: the `var h` hour
+  local shadowed the outer `h` HTML accumulator. Renamed to `hr`/`rm`.
+
+---
+
 ## [0.5.1] 2026-04-04
 
 ### Added

@@ -5,7 +5,7 @@
 // Initialise NTP and set timezone. Returns false if sync times out.
 bool initTime();
 
-// Formatted time string — respects TIME_24HR_DEFAULT (Phase 2: NVS override).
+// Formatted time string — respects TIME_24HR_DEFAULT from config.h.
 // Pointer valid until next call.
 const char* getTimeStr();
 

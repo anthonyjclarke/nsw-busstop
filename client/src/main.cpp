@@ -112,7 +112,6 @@ void setup() {
 
 void loop() {
   ArduinoOTA.handle();
-  handleWebServer();
 
   uint32_t now = millis();
 

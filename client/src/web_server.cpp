@@ -16,12 +16,12 @@ static AsyncWebServer server(WEB_PORT);
 
 // GET /api/state
 // Returns current time, date, and all stop departure data as JSON.
-// Used by the Phase 3 canvas mirror and any external consumers.
+// Consumed by the device dashboard at `/` and any external viewers.
 static void handleApiState(AsyncWebServerRequest* req) {
   // Recalculate minutes so the JSON always reflects current time
   recalcMinutes();
 
-  StaticJsonDocument<3072> doc;
+  StaticJsonDocument<2048> doc;
 
   doc["time"]  = getTimeStr();
   doc["date"]  = getDateStr();
@@ -62,7 +62,7 @@ static void handleApiState(AsyncWebServerRequest* req) {
 }
 
 // GET /
-// Dashboard — polls /api/state every 60s, recalculates minutes every 15s client-side.
+// Dashboard — polls /api/state every 15s, re-renders every 5s client-side.
 static const char ROOT_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -100,7 +100,7 @@ h1{font-size:1.2em;margin-bottom:.15em}
 <div class="hdr"><span class="ts" id="clock">--</span><span class="upd" id="upd">--</span></div>
 <div id="alerts"></div>
 <div id="stops">Loading...</div>
-<div class="ft"><a href="/api/state">JSON</a></div>
+<div class="ft"><a href="/config">Config</a></div>
 <script>
 var D=null,fetched=0;
 function fetchAndRender(){
@@ -154,7 +154,8 @@ function render(){
       } else if(m<=0){
         if(m<0){cls='gone';label='Gone';}else{cls='now';label='Now';}
       } else {
-        cls=m<10?'near':'far';label=m+'m';
+        if(m>=60){var hr=Math.floor(m/60),rm=m%60;cls='far';label=rm===0?hr+'h':hr+'h'+rm+'m';}
+        else{cls=m<10?'near':'far';label=m+'m';}
       }
       var dl=fmtDelay(d.delay);
       var dest=d.dest||'';
@@ -187,9 +188,167 @@ static void handleRoot(AsyncWebServerRequest* req) {
   req->send(200, "text/html", ROOT_HTML);
 }
 
-// GET /mirror — redirect to root (now serves live data)
-static void handleMirror(AsyncWebServerRequest* req) {
-  req->redirect("/");
+// GET /config — device config + stats page
+static const char CONFIG_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CYD BusStop — Config</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#111;color:#fff;padding:1em;max-width:480px;margin:0 auto}
+h1{font-size:1.2em;margin-bottom:.6em}
+h2{font-size:.95em;margin:.8em 0 .4em;color:#0cf}
+.card{background:#1a1a1a;border-radius:6px;padding:.8em;margin-bottom:.6em}
+.row{display:flex;justify-content:space-between;padding:.2em 0;font-size:.85em;gap:.5em}
+.row span:first-child{color:#888}
+.row span:last-child{color:#fff;font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-all}
+label{display:block;color:#888;font-size:.8em;margin-bottom:.25em}
+input{width:100%;padding:.5em;border-radius:4px;border:1px solid #333;background:#222;color:#fff;font-family:ui-monospace,Menlo,monospace;font-size:.85em}
+button{padding:.5em 1em;border-radius:4px;border:0;background:#0cf;color:#000;font-weight:600;cursor:pointer;margin-top:.5em}
+button:hover{background:#0af}
+.status{font-size:.75em;margin-top:.4em;min-height:1em}
+.ok{color:#0f0}.err{color:#f44}
+.ft{margin-top:.8em;font-size:.75em;color:#444;text-align:center}
+.ft a{color:#0cf;text-decoration:none;margin:0 .5em}
+</style></head><body>
+<h1>BusStop Config</h1>
+
+<div class="card">
+<h2>NAS Server</h2>
+<label for="nasUrl">Server URL</label>
+<input id="nasUrl" type="text" placeholder="http://192.168.1.100:8081">
+<button onclick="saveNas()">Save</button>
+<div id="nasStatus" class="status"></div>
+</div>
+
+<div class="card">
+<h2>System Stats</h2>
+<div id="stats">Loading...</div>
+</div>
+
+<div class="ft"><a href="/">Departures</a><a href="/api/state">JSON</a></div>
+
+<script>
+function load(){
+  fetch('/api/config').then(function(r){return r.json();}).then(function(d){
+    document.getElementById('nasUrl').value=d.nasUrl||'';
+    var rows=[
+      ['Uptime',d.uptime],
+      ['Firmware',d.build],
+      ['WiFi SSID',d.ssid],
+      ['IP',d.ip],
+      ['RSSI',d.rssi+' dBm'],
+      ['MAC',d.mac],
+      ['Hostname',d.hostname],
+      ['Free Heap',(d.heap/1024).toFixed(1)+' KB'],
+      ['Max Block',(d.maxBlk/1024).toFixed(1)+' KB'],
+      ['Last Fetch',d.lastFetch],
+      ['Chip',d.chip]
+    ];
+    var h='';
+    rows.forEach(function(r){h+='<div class="row"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>';});
+    document.getElementById('stats').innerHTML=h;
+  });
+}
+function saveNas(){
+  var url=document.getElementById('nasUrl').value.trim();
+  var s=document.getElementById('nasStatus');
+  s.textContent='Saving...';s.className='status';
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nasUrl:url})})
+    .then(function(r){
+      if(r.ok){s.textContent='Saved. Reboot to apply.';s.className='status ok';}
+      else{s.textContent='Save failed';s.className='status err';}
+    }).catch(function(){s.textContent='Save failed';s.className='status err';});
+}
+load();
+setInterval(load,10000);
+</script>
+</body></html>)rawliteral";
+
+static void handleConfigPage(AsyncWebServerRequest* req) {
+  req->send(200, "text/html", CONFIG_HTML);
+}
+
+static void formatUptime(uint32_t ms, char* buf, size_t len) {
+  uint32_t s = ms / 1000;
+  uint32_t d = s / 86400; s %= 86400;
+  uint32_t h = s / 3600;  s %= 3600;
+  uint32_t m = s / 60;    s %= 60;
+  if (d) snprintf(buf, len, "%ud %uh %um", d, h, m);
+  else if (h) snprintf(buf, len, "%uh %um %us", h, m, s);
+  else snprintf(buf, len, "%um %us", m, s);
+}
+
+// GET /api/config — system stats + current config
+static void handleApiConfigGet(AsyncWebServerRequest* req) {
+  StaticJsonDocument<1024> doc;
+
+  char upbuf[32];
+  formatUptime(millis(), upbuf, sizeof(upbuf));
+  doc["uptime"] = upbuf;
+  doc["build"]  = __DATE__ " " __TIME__;
+
+  doc["ssid"]     = WiFi.SSID();
+  doc["ip"]       = WiFi.localIP().toString();
+  doc["rssi"]     = WiFi.RSSI();
+  doc["mac"]      = WiFi.macAddress();
+  doc["hostname"] = OTA_HOSTNAME;
+
+  doc["heap"]   = ESP.getFreeHeap();
+  doc["maxBlk"] = ESP.getMaxAllocHeap();
+
+  char chipBuf[32];
+  snprintf(chipBuf, sizeof(chipBuf), "%s rev%d, %d MHz",
+           ESP.getChipModel(), ESP.getChipRevision(), ESP.getCpuFreqMHz());
+  doc["chip"] = chipBuf;
+
+  // Last fetch age from any valid stop (they all update together)
+  uint32_t lastMs = 0;
+  for (uint8_t i = 0; i < STOP_COUNT; i++) {
+    if (stopData[i].lastFetchMs > lastMs) lastMs = stopData[i].lastFetchMs;
+  }
+  if (lastMs) {
+    char fbuf[24];
+    snprintf(fbuf, sizeof(fbuf), "%us ago", (millis() - lastMs) / 1000);
+    doc["lastFetch"] = fbuf;
+  } else {
+    doc["lastFetch"] = "never";
+  }
+
+  doc["nasUrl"] = getNasUrl();
+
+  String body;
+  serializeJson(doc, body);
+  req->send(200, "application/json", body);
+}
+
+// POST /api/config — update NAS URL (JSON body: {"nasUrl":"..."})
+static void handleApiConfigPost(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (index != 0 || len != total) {
+    req->send(400, "application/json", "{\"error\":\"chunked body not supported\"}");
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, data, len);
+  if (err) {
+    req->send(400, "application/json", "{\"error\":\"invalid json\"}");
+    return;
+  }
+
+  const char* url = doc["nasUrl"];
+  if (!url || strlen(url) < 8) {
+    req->send(400, "application/json", "{\"error\":\"nasUrl required\"}");
+    return;
+  }
+
+  if (!setNasUrl(String(url))) {
+    req->send(500, "application/json", "{\"error\":\"save failed\"}");
+    return;
+  }
+
+  req->send(200, "application/json", "{\"ok\":true}");
 }
 
 // ---------------------------------------------------------------------------
@@ -197,15 +356,15 @@ static void handleMirror(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 
 void initWebServer() {
-  server.on("/",          HTTP_GET, handleRoot);
-  server.on("/api/state", HTTP_GET, handleApiState);
-  server.on("/mirror",    HTTP_GET, handleMirror);
+  server.on("/",           HTTP_GET, handleRoot);
+  server.on("/config",     HTTP_GET, handleConfigPage);
+  server.on("/api/state",  HTTP_GET, handleApiState);
+  server.on("/api/config", HTTP_GET, handleApiConfigGet);
+  server.on("/api/config", HTTP_POST,
+            [](AsyncWebServerRequest* req) {},
+            NULL,
+            handleApiConfigPost);
 
   server.begin();
   DBG_INFO("Web server started — http://%s/", WiFi.localIP().toString().c_str());
-}
-
-void handleWebServer() {
-  // AsyncWebServer handles requests via interrupt — nothing needed here.
-  // ArduinoOTA is handled in loop() via main.cpp.
 }

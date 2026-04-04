@@ -40,7 +40,7 @@ docker compose up -d --build
 | `app/db.py` | Engine creation, session factory, DB init |
 | `app/services/tfnsw.py` | TfNSW API polling + departure parsing |
 | `app/services/stops.py` | Stop CRUD operations |
-| `app/services/auth.py` | Username/password check, session helpers |
+| `app/services/auth.py` | Session + Bearer token auth, login check |
 | `app/templates/dashboard.html` | Main UI — departures + settings tabs |
 | `docker-compose.yml` | Single service with named volume |
 | `.env` | Live config (gitignored) |

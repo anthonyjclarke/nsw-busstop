@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import platform
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -58,28 +59,35 @@ def _local_now() -> datetime:
 
 
 def _date_label(dt: datetime) -> str:
-    return dt.strftime("%a, %d %b")
+    return dt.strftime("%a, %-d %b")
 
 
-def _mask_value(value: str, *, keep_start: int = 4, keep_end: int = 4) -> str:
-    if not value:
-        return "(empty)"
-    if len(value) <= keep_start + keep_end:
-        return "*" * len(value)
-    return f"{value[:keep_start]}{'*' * (len(value) - keep_start - keep_end)}{value[-keep_end:]}"
+_started_at: datetime = datetime.now(UTC)
 
 
-def _runtime_config() -> dict[str, Any]:
+def _format_uptime(delta) -> str:
+    total = int(delta.total_seconds())
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, _ = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h {mins}m"
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+def _server_status() -> dict[str, Any]:
+    with get_session() as session:
+        stop_count = len(list_stops(session))
     return {
-        "authEnabled": settings.auth_enabled,
-        "username": settings.app_username,
-        "passwordMask": _mask_value(settings.app_password, keep_start=0, keep_end=0),
-        "tfnswKeyMask": _mask_value(settings.tfnsw_api_key),
-        "sessionSecretMask": _mask_value(settings.session_secret),
+        "uptime": _format_uptime(datetime.now(UTC) - _started_at),
+        "stopCount": stop_count,
+        "lastRefresh": app.state.last_refresh.isoformat() if app.state.last_refresh else None,
+        "lastError": app.state.last_error,
         "timezone": settings.timezone,
         "pollIntervalSeconds": settings.poll_interval_seconds,
-        "port": settings.port,
-        "configSource": "Active container environment from the NAS project folder selected in Synology Container Manager",
+        "pythonVersion": platform.python_version(),
     }
 
 
@@ -160,7 +168,8 @@ async def dashboard(request: Request) -> HTMLResponse:
             "payload": payload,
             "poll_interval_seconds": settings.poll_interval_seconds,
             "timezone": settings.timezone,
-            "runtime_config": _runtime_config(),
+            "auth_enabled": settings.auth_enabled,
+            "server_status": _server_status(),
         },
     )
 

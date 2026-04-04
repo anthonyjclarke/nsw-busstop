@@ -1,11 +1,78 @@
 # NSW BusStop
 
-Real-time Sydney bus departure display system. A Python server polls TfNSW APIs
-and an ESP32 CYD renders the results on a TFT screen.
+A real-time Sydney bus departure display system built around the **Transport for
+NSW Trip Planner API**. A small FastAPI server polls TfNSW every 60 seconds and
+serves a normalised JSON feed to an ESP32 CYD (Cheap Yellow Display) that shows
+the next three departures for four configured stops on its TFT screen.
 
 ```
-[TfNSW API] --> [Server on NAS :8081] --> [ESP32 Client (CYD TFT)]
+[TfNSW API] → [FastAPI server on NAS :8081] → [ESP32 client · CYD TFT]
+                       ↑                                ↑
+               (stop config,                  (dashboard mirror,
+                polling, JSON                  device config at
+                normalisation)                 http://cyd-busstop.local/)
 ```
+
+The client is a **thin client** — all TfNSW authentication, polling, caching,
+alert handling, real-time flag extraction, and timezone conversion happen on
+the server. The ESP32 just fetches pre-processed JSON and renders it.
+
+---
+
+## Screenshots
+
+### ESP32 TFT device
+
+![Client TFT display](images/client-cyd-screenshot.png)
+
+2x2 stop layout on the CYD 2.8" screen: time/date header, per-stop departures
+with real-time/scheduled indicators, footer server-status dot and `upd HH:MM`.
+
+### Client device dashboard (mirror)
+
+![Client local mirror WebUI](images/client-web-dashboard.png)
+
+Browser view served directly by the ESP32 at its LAN IP. Mirrors the currently
+cached state — useful for checking what the device is actually rendering and
+for editing the NAS server URL from the `/config` page.
+
+### Server dashboard
+
+![Server dashboard](images/server-ui.png)
+
+Canonical live dashboard served by the FastAPI container on the NAS. Source of
+truth for the stop list and departure data the client consumes.
+
+### Server stop editor
+
+![Server stop configuration](images/server-stops-edit.png)
+
+Server-side stop editor on the **Settings** tab. Add, rename, or replace the
+configured stop IDs; changes are persisted to SQLite and feed the next
+`/api/state` response. Client stop editing has been removed — all stop
+configuration lives on the server.
+
+---
+
+## Features
+
+- **Live TfNSW data** — real-time bus departures, delay reporting, destination,
+  service-alert subtitles
+- **Day-aware display** — "Now", `5m`, `1h5m`, or a 3-letter day abbreviation
+  (`Mon`, `Tue`, …) for non-today departures
+- **Real-time vs scheduled** — green dot for GPS-tracked buses, grey tilde for
+  scheduled-only
+- **Resilient cached display** — cached departures keep counting down locally
+  when the server is briefly unreachable; TFT footer shows a red dot when the
+  last poll failed
+- **Server-side stop management** — edit the configured stops from the server
+  dashboard; the ESP32 mirrors the list on its next poll
+- **Device config page** — edit the NAS URL on the ESP32 from its own `/config`
+  page; see live system stats (uptime, WiFi RSSI, heap, build, etc.)
+- **Docker-native server** — runs as a single container on a Synology DS423+
+  via Container Manager; SQLite persisted in a Docker named volume
+- **Optional Bearer-token auth** — shared `NAS_API_KEY` between server and
+  client protects `/api/state`; disabled by default for simple LAN use
 
 ---
 
@@ -13,23 +80,54 @@ and an ESP32 CYD renders the results on a TFT screen.
 
 ### Server (`server/`)
 
-Python FastAPI application. Polls TfNSW departure APIs, stores stop configuration
-in SQLite, and serves a web dashboard plus JSON API. Runs as a Docker container on
-a Synology NAS.
+Python/FastAPI application. Polls TfNSW, stores stop configuration in SQLite,
+serves a web dashboard + JSON API. Runs as a Docker container.
 
-- **Tech:** Python 3.12, FastAPI, SQLModel, SQLite, Jinja2
-- **Port:** 8081 (default)
+- **Tech:** Python 3.12, FastAPI, SQLModel, SQLite, httpx, Jinja2
+- **Port:** 8081
 - **Details:** [server/README.md](server/README.md)
 
 ### Client (`client/`)
 
-ESP32 PlatformIO/Arduino project for the CYD 2.8" TFT display. Fetches
-pre-processed JSON from the server and renders a 2x2 grid of bus stop panels
-with live countdowns.
+ESP32 Arduino firmware for the CYD 2.8" TFT. Fetches JSON from the server and
+renders a 2x2 grid of bus stop panels with live countdowns.
 
-- **Tech:** ESP32 Arduino, TFT_eSPI, ArduinoJson, ezTime
-- **Hardware:** ESP32-2432S028R (CYD 2.8"), ILI9341, 240x320
+- **Tech:** ESP32 Arduino, TFT_eSPI, ArduinoJson, ezTime, ESPAsyncWebServer
+- **Hardware:** ESP32-2432S028R (CYD 2.8"), ILI9341 240x320
 - **Details:** [client/README.md](client/README.md)
+
+---
+
+## Cross-Component JSON Contract
+
+`GET /api/state` is the single interface between server and client:
+
+```json
+{
+  "time": "10:30:00", "date": "Fri, 4 Apr",
+  "now": 1743742200, "tzOff": 36000,
+  "lastRefresh": "2026-04-04T10:30:00+10:00",
+  "lastError": null,
+  "stops": [
+    {
+      "id": "2112130",
+      "name": "To Gladesville",
+      "valid": true,
+      "fetch_age": 45,
+      "alert": "",
+      "departures": [
+        {
+          "route": "500", "clock": "10:35", "minutes": 5,
+          "epoch": 1743742500, "rt": true, "delay": 120,
+          "dest": "Circular Quay"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Any change to this schema requires a coordinated update across both components.
 
 ---
 
@@ -39,23 +137,27 @@ with live countdowns.
 
 ```bash
 # Copy server/ to your NAS (see deployment guide below)
-# Configure server/app/.env with your TfNSW API key
-# Build and start via Container Manager
+cp server/.env.example server/app/.env
+# Edit server/app/.env — add your TfNSW API key
+# Build and start via Synology Container Manager
 ```
 
 ### 2. Client (on Mac)
 
 ```bash
 # Open nsw-busstop.code-workspace in VSCode
-# Create client/include/secrets.h from secrets.h.example
-pio run -d client/ -t upload       # Flash firmware
+cp client/include/secrets.h.example client/include/secrets.h
+# Edit secrets.h with your WiFi credentials (optional — can use captive portal)
+pio run -d client/ -t upload
 ```
 
 ### 3. First boot
 
 1. Connect to the `CYD-BusStop` WiFi AP from your phone
 2. Enter your WiFi credentials in the captive portal
-3. Device connects, syncs time, and fetches bus data from the server
+3. Device connects, syncs time, fetches bus data from the server
+4. If the server is not at the default `http://192.168.1.100:8081`, open
+   `http://cyd-busstop.local/config` and change the NAS URL
 
 ---
 
@@ -115,12 +217,10 @@ The `app/.env` file lives **only on the NAS** — it is never committed to git.
 7. Wait for the build to complete (first build takes 1-2 minutes)
 8. Verify: open `http://<nas-ip>:8081` in your browser
 
-You should see the bus departure dashboard. Configure your stops directly on
-the dashboard page.
+You should see the bus departure dashboard. Configure your stops from the
+**Settings** tab.
 
 ### Updating after code changes
-
-When you pull new code from git and need to update the server on the NAS:
 
 1. On your Mac, pull the latest changes: `git pull`
 2. Copy the updated `server/` files to the NAS folder (same Finder method)
@@ -130,11 +230,9 @@ When you pull new code from git and need to update the server on the NAS:
 
 3. In Container Manager: **Project** > `nsw-busstop-server` > **Action** > **Build**
 4. Container Manager rebuilds the image and restarts the container
-5. Your stop configuration and database are preserved (Docker named volume)
+5. Stop configuration and database are preserved (Docker named volume)
 
 ### Using rsync (advanced)
-
-If you prefer the command line, use rsync to sync files while excluding `app/.env`:
 
 ```bash
 rsync -av --exclude 'app/.env' --exclude '__pycache__' --exclude 'data/' \
@@ -151,16 +249,15 @@ sudo docker compose up -d --build
 
 ### Data persistence
 
-- The SQLite database is stored in a Docker **named volume** (`nsw-busstop-data`)
-- This volume persists across container rebuilds and restarts
-- Stop configuration survives updates — you won't lose your stops
+The SQLite database lives in a Docker **named volume** (`nsw-busstop-data`)
+that persists across container rebuilds. Stop configuration survives updates.
 
 **Backup the database:**
 ```bash
 docker cp nsw-busstop-server:/app/data/busstop.db ./busstop-backup.db
 ```
 
-**Reset all data** (removes stop config — will re-seed with defaults):
+**Reset all data** (removes stop config — re-seeds with defaults):
 ```bash
 docker volume rm nsw-busstop-data
 # Then rebuild the container
@@ -168,16 +265,17 @@ docker volume rm nsw-busstop-data
 
 ### Environment variable reference
 
-| Variable               | Required | Default            | Purpose                      |
-|:-----------------------|:---------|:-------------------|:-----------------------------|
-| `TFNSW_API_KEY`        | Yes      | —                  | TfNSW API key                |
-| `AUTH_ENABLED`         | No       | `false`            | Enable dashboard login       |
-| `APP_USERNAME`         | No       | `admin`            | Dashboard username           |
-| `APP_PASSWORD`         | Yes*     | `change-me`        | Dashboard password           |
-| `SESSION_SECRET`       | Yes*     | —                  | Cookie signing secret        |
-| `TIMEZONE`             | No       | `Australia/Sydney` | Display timezone             |
-| `POLL_INTERVAL_SECONDS`| No      | `60`               | TfNSW fetch interval (secs) |
-| `PORT`                 | No       | `8081`             | Server port                  |
+| Variable                | Required | Default            | Purpose                       |
+|:------------------------|:---------|:-------------------|:------------------------------|
+| `TFNSW_API_KEY`         | Yes      | —                  | TfNSW Trip Planner API key    |
+| `AUTH_ENABLED`          | No       | `false`            | Enable dashboard login        |
+| `APP_USERNAME`          | No       | `admin`            | Dashboard username            |
+| `APP_PASSWORD`          | Yes\*    | `change-me`        | Dashboard password            |
+| `SESSION_SECRET`        | Yes\*    | —                  | Cookie signing secret         |
+| `NAS_API_KEY`           | No       | (empty)            | Bearer token for ESP32 client |
+| `TIMEZONE`              | No       | `Australia/Sydney` | Display timezone              |
+| `POLL_INTERVAL_SECONDS` | No       | `60`               | TfNSW fetch interval          |
+| `PORT`                  | No       | `8081`             | Server port                   |
 
 \* Required when `AUTH_ENABLED=true`.
 
@@ -186,11 +284,25 @@ docker volume rm nsw-busstop-data
 | Symptom                        | Fix                                                    |
 |:-------------------------------|:-------------------------------------------------------|
 | Container won't start          | Check `app/.env` exists and `TFNSW_API_KEY` is set     |
-| Dashboard shows no departures  | Verify API key is valid at TfNSW Open Data portal      |
-| Port conflict                  | Port `8081` is published directly in `docker-compose.yml`; if you need a different host port, edit the compose file and recreate the project |
-| ESP32 shows HTTP 401           | Set `AUTH_ENABLED=false` in `app/.env`, or set matching `NAS_API_KEY` / `SECRET_NAS_API_KEY` values |
-| "Bind mount failed"            | Ensure using named volume (default docker-compose.yml) |
+| Dashboard shows no departures  | Verify API key is valid at the TfNSW Open Data portal  |
+| Port conflict                  | Edit `docker-compose.yml` to change the host port      |
+| ESP32 shows HTTP 401           | Set `AUTH_ENABLED=false`, or set matching `NAS_API_KEY` / `SECRET_NAS_API_KEY` values |
+| "Bind mount failed"            | Ensure named volume is used (default docker-compose.yml) |
 | Stops reset after rebuild      | Normal if volume was deleted; reconfigure in dashboard  |
+
+---
+
+## Secrets
+
+| Secret            | Location                              | Purpose                       |
+|:------------------|:--------------------------------------|:------------------------------|
+| TfNSW API key     | `server/app/.env` (NAS only)          | TfNSW Trip Planner API access |
+| Dashboard creds   | `server/app/.env` (NAS only)          | Server dashboard login        |
+| NAS API key       | `server/app/.env` + `client/include/secrets.h` | Shared Bearer token for `/api/state` |
+| WiFi credentials  | `client/include/secrets.h`            | WiFiManager seed              |
+
+Templates: `server/.env.example` (copy to `server/app/.env`) and
+`client/include/secrets.h.example`. Both `.env` and `secrets.h` are gitignored.
 
 ---
 
@@ -198,23 +310,26 @@ docker volume rm nsw-busstop-data
 
 ```
 nsw-busstop/
-├── client/                  # ESP32 PlatformIO project
+├── client/                       # ESP32 PlatformIO project
 │   ├── platformio.ini
 │   ├── partitions_custom.csv
-│   ├── include/             # config.h, debug.h, secrets.h
-│   ├── src/                 # main.cpp, display, bus_api, etc.
+│   ├── include/                  # config.h, debug.h, secrets.h
+│   ├── src/                      # main.cpp, display, bus_api, etc.
+│   ├── CHANGELOG.md
 │   └── README.md
 │
-├── server/                  # Python FastAPI server
+├── server/                       # Python FastAPI server
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   ├── requirements.txt
 │   ├── .env.example
-│   └── app/                 # FastAPI application
+│   ├── app/                      # FastAPI application
+│   └── README.md
 │
-├── README.md                # This file
-├── CLAUDE.md                # AI assistant context
-└── nsw-busstop.code-workspace  # VSCode multi-root workspace
+├── images/                       # Screenshots used in this README
+├── README.md                     # This file
+├── CLAUDE.md                     # AI assistant context
+└── nsw-busstop.code-workspace    # VSCode multi-root workspace
 ```
 
 ---
@@ -238,11 +353,8 @@ uvicorn app.main:app --reload --port 8081
 ### Client
 
 ```bash
-# Create secrets file
 cp client/include/secrets.h.example client/include/secrets.h
 # Edit secrets.h with your WiFi credentials
-
-# Build and flash
 pio run -d client/ -t upload
 ```
 

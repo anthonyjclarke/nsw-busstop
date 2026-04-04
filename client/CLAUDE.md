@@ -131,7 +131,7 @@ Minutes display logic:
 - `>=60`: "{h}h{mm}m" (yellow)
 - Non-today departures: 3-letter day abbreviation (grey, e.g. "Mon")
 
-Footer: `Server Status` plus a green/red dot on the left, `upd HH:MM` on the
+Footer: `Server Status` label with a green/red dot beside it, `upd HH:MM` on the
 right, updated after each NAS fetch attempt.
 
 ## Refresh Strategy
@@ -145,21 +145,31 @@ right, updated after each NAS fetch attempt.
 
 ## Device Web API Endpoints
 
-| Method | Path         | Description                                     |
-|:-------|:-------------|:------------------------------------------------|
-| GET    | `/`          | Bus departures WebUI (PROGMEM HTML + JS)        |
-| GET    | `/api/state` | Cached stop data (re-serialised, mirrors NAS)   |
-| GET    | `/mirror`    | Redirect to `/`                                 |
+| Method | Path          | Description                                     |
+|:-------|:--------------|:------------------------------------------------|
+| GET    | `/`           | Bus departures WebUI (PROGMEM HTML + JS)        |
+| GET    | `/config`     | Device config + system stats page               |
+| GET    | `/api/state`  | Cached stop data (re-serialised, mirrors NAS)   |
+| GET    | `/api/config` | System stats + current NAS URL as JSON          |
+| POST   | `/api/config` | Update NAS URL (body: `{"nasUrl":"..."}`)       |
 
-## WebUI (`/`)
+## WebUI (`/` and `/config`)
 
-PROGMEM-embedded dark-themed dashboard served by AsyncWebServer. Mirrors the
-client's current local state for inspection in a browser.
+Two PROGMEM-embedded dark-themed pages served by AsyncWebServer. No filesystem
+assets — all HTML/CSS/JS is compiled into flash.
 
-Features:
+**`/` — Departures dashboard**
+- Mirrors the client's current cached state (not the NAS directly)
 - Live bus departures with real-time badges, delay pills, day labels
 - Auto-polls `/api/state` every 15s, re-renders every 5s
-- Link to raw JSON at `/api/state`
+- Link to `/config`
+
+**`/config` — Device config + stats**
+- NAS URL editor (persists to NVS, takes effect on reboot)
+- System stats: uptime, firmware build, WiFi SSID/IP/RSSI/MAC, hostname, free
+  heap, max alloc block, last-fetch age, chip info
+- Auto-refreshes stats every 10s
+- Links to `/` and raw `/api/state` JSON
 
 ## Secrets (`include/secrets.h`)
 
@@ -218,4 +228,3 @@ Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
 - The stop list is not persisted locally; it is replaced by the server response order on each successful NAS fetch
 - `fetchAllStops()` blocks loop() for ~50-200ms (LAN HTTP); acceptable vs v1's ~10s TLS
 - Built-in fonts require explicit `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FONT4=1` build flags
-- `handleWebServer()` is a no-op — AsyncWebServer is fully event-driven, but the call is kept for future use
