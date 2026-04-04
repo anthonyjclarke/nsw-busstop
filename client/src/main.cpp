@@ -131,13 +131,6 @@ void loop() {
     drawLastUpdated(s_lastFetchStr, s_serverOffline);
   }
 
-  // WebUI stop edits queue a refresh so the async request task stays non-blocking.
-  if (consumeStopRefreshRequest()) {
-    s_lastPoll = now;
-    s_lastPanelRefresh = now;
-    performBusRefresh();
-  }
-
   // Full bus API refresh on poll interval
   if (now - s_lastPoll >= POLL_INTERVAL_MS) {
     s_lastPoll         = now;

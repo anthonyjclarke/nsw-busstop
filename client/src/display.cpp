@@ -161,10 +161,9 @@ void drawLastUpdated(const char* timeStr, bool serverOffline) {
   char buf[12];
   snprintf(buf, sizeof(buf), "upd %s", timeStr);
 
-  if (serverOffline) {
-    tft.setTextColor(TFT_RED, COL_BG);
-    tft.drawString("SERVER OFFLINE", PAD_X, 224, 2);
-  }
+  tft.setTextColor(COL_DATE_FG, COL_BG);
+  tft.drawString("Server Status", PAD_X, 224, 2);
+  tft.fillCircle(PAD_X + 44, 231, 4, serverOffline ? TFT_RED : TFT_GREEN);
 
   tft.setTextColor(COL_DATE_FG, COL_BG);
   tft.drawRightString(buf, 320 - PAD_X, 224, 2);

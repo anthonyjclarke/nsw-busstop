@@ -1,9 +1,9 @@
 # CYD_BusStop_NSW Client
 
 ESP32 bus departure display for the **ESP32-2432S028R (CYD 2.8")**. This is the
-**client** component of the [nsw-busstop](../README.md) system — it fetches
-pre-processed bus data from the companion [server](../server/) and renders it on
-the TFT.
+**client** component of the [nsw-busstop](../README.md) system: it fetches
+pre-processed bus data from the companion [server](../server/), mirrors that
+state locally, and renders it on the TFT.
 
 **The server must be running on your local network for this device to show bus data.**
 
@@ -17,7 +17,51 @@ the TFT.
 - Real-time indicators: green dot = GPS-tracked, grey tilde = scheduled
 - "Now" label for imminent buses, day abbreviation for non-today departures
 - Live time/date header updated every second via NTP
-- Device WebUI for cached state view and stop configuration
+- Device WebUI for cached state mirror
+
+---
+
+## Screenshots
+
+### Client
+
+**TFT device display**
+
+![Client TFT display](images/client-cyd-screenshot.png)
+
+Shows the live 2x2 stop layout on the CYD screen:
+- top header with current time/date
+- per-stop departures with realtime/scheduled indicators
+- footer with `Server Status` dot and last successful update time
+
+**Client local mirror WebUI**
+
+![Client local mirror WebUI](images/client-web-dashboard.png)
+
+Browser view served directly by the ESP32:
+- mirrors the client’s currently cached state
+- useful for checking what the device is actually rendering
+- exposes the same stop/departure data via `/api/state`
+
+### Server
+
+**Server dashboard**
+
+![Server dashboard](images/server-ui.png)
+
+Main FastAPI dashboard running on the NAS:
+- shows the canonical live stop list and departures
+- reflects the server-side polling state
+- is the source of truth the client now follows
+
+**Server stop configuration**
+
+![Server stop configuration](images/server-stops-edit.png)
+
+Server-side stop editor:
+- add or replace the configured stop IDs and names on the NAS
+- changes here feed the server `/api/state` response
+- client stop editing has been removed, so configuration belongs here
 
 ---
 
@@ -60,7 +104,7 @@ Upload speed: 230400 baud. Port: auto-detected.
 1. Connect to the `CYD-BusStop` WiFi AP from your phone
 2. Enter your WiFi credentials in the captive portal
 3. Device connects, syncs time, and fetches bus data from the server
-4. Access device WebUI at the displayed IP to configure NAS URL if needed
+4. Access device WebUI at the displayed IP to inspect the mirrored local state if needed
 
 ### 4. OTA updates
 
@@ -98,9 +142,9 @@ client/
 │   ├── main.cpp               # setup(), loop(), init orchestration
 │   ├── display.cpp/.h         # TFT drawing — header, panels, status bar
 │   ├── bus_api.cpp/.h         # NAS fetch, JSON parse, data structs
-│   ├── config.cpp             # Stop + NAS URL NVS persistence
+│   ├── config.cpp             # Default stop seed + NAS URL NVS persistence
 │   ├── time_mgr.cpp/.h        # ezTime NTP, time/date/day helpers
-│   ├── web_server.cpp/.h      # AsyncWebServer, device config API
+│   ├── web_server.cpp/.h      # AsyncWebServer, local mirror WebUI/API
 │   └── debug.cpp              # Wall-clock timestamp for debug output
 ```
 
@@ -110,27 +154,26 @@ client/
 
 Access at the device's IP address or `http://cyd-busstop.local/`.
 
-| Method | Path               | Description                                |
-|:-------|:-------------------|:-------------------------------------------|
-| GET    | `/`                | Live local dashboard + stop editor         |
-| GET    | `/api/state`       | Cached NAS data with current countdowns    |
-| GET    | `/api/stops`       | Current stop configuration                 |
-| POST   | `/api/stops`       | Replace stop ids/names and queue refresh   |
-| POST   | `/api/stops/reset` | Restore default stop ids/names             |
+| Method | Path         | Description                              |
+|:-------|:-------------|:-----------------------------------------|
+| GET    | `/`          | Live local dashboard mirror              |
+| GET    | `/api/state` | Cached NAS data with current countdowns  |
+| GET    | `/mirror`    | Redirect to `/`                          |
 
 ---
 
 ## Display Layout
 
-![TFT dashboard](images/cyd-screenshot.png)
-
 Landscape 320x240. Header bar with time and date, then 2x2 grid of stop panels.
 Each panel shows the stop name and up to 3 departure rows with route number,
 real-time indicator, countdown, and clock time.
 
-Footer shows `upd HH:MM` for the last successful NAS fetch. If the NAS becomes
-unreachable, the footer prepends `SERVER OFFLINE` in red while the client keeps
-aging the cached countdowns locally.
+Footer shows `Server Status` plus a status dot on the left and `upd HH:MM` on
+the right: green when the NAS is reachable, red when it is not. Cached
+countdowns continue aging locally between successful polls.
+
+The stop list itself now comes from the NAS response order; the client no longer
+offers local stop editing.
 
 ---
 

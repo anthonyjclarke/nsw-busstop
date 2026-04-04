@@ -32,12 +32,6 @@ void initStopConfig();
 
 bool setStopConfig(uint8_t idx, const char* stopId, const char* stopName);
 
-bool saveStopConfig();
-
-bool loadStopConfig();
-
-bool resetStopConfig();
-
 // ---------------------------------------------------------------------------
 // Refresh
 // ---------------------------------------------------------------------------

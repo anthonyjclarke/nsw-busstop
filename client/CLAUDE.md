@@ -14,7 +14,7 @@ The server must be running on your local network for this device to display any 
 Displays the next 3 bus departures for up to 4 NSW stops near Ryde/Putney on the
 CYD TFT display. Departure data is fetched from a local NAS server (Python FastAPI
 at `192.168.1.100:8081`) rather than calling TfNSW directly. Stop configuration is
-managed via the NAS dashboard or the device's built-in WebUI stop editor.
+managed on the NAS; the client mirrors the stop list returned by the server.
 
 ## Target Hardware
 
@@ -78,8 +78,8 @@ NAS URL is editable at runtime via `setNasUrl()` and persisted in NVS.
 | `src/display.cpp/.h`     | All TFT drawing — header, panels, status bar         |
 | `src/bus_api.cpp/.h`     | NAS fetch, JSON parse, StopData/Departure structs    |
 | `src/time_mgr.cpp/.h`    | ezTime NTP init, time/date/day helpers, TZ offset    |
-| `src/web_server.cpp/.h`  | AsyncWebServer, PROGMEM WebUI, stop/state API        |
-| `src/config.cpp`         | Stop config + NAS URL: NVS load/save                 |
+| `src/web_server.cpp/.h`  | AsyncWebServer, PROGMEM WebUI, local state API       |
+| `src/config.cpp`         | Default stop seed + NAS URL NVS load/save            |
 | `src/debug.cpp`          | `dbgTimestamp()` — wall-clock or uptime fallback      |
 | `include/config.h`       | Tuneable constants + NAS config declarations         |
 | `include/debug.h`        | Levelled debug macros with wall-clock timestamps     |
@@ -131,7 +131,8 @@ Minutes display logic:
 - `>=60`: "{h}h{mm}m" (yellow)
 - Non-today departures: 3-letter day abbreviation (grey, e.g. "Mon")
 
-Footer: `upd HH:MM` — dim grey, bottom-right corner, updated on each NAS fetch.
+Footer: `Server Status` plus a green/red dot on the left, `upd HH:MM` on the
+right, updated after each NAS fetch attempt.
 
 ## Refresh Strategy
 
@@ -141,28 +142,22 @@ Footer: `upd HH:MM` — dim grey, bottom-right corner, updated on each NAS fetch
 | TFT stop panels  | 15 s     | `recalcMinutes()` from stored epoch      |
 | NAS fetch        | 60 s     | `fetchAllStops()` — single HTTP GET      |
 | WebUI poll       | 15 s     | `fetch('/api/state')` from browser JS    |
-| Stop config edit | on-demand| `consumeStopRefreshRequest()` in loop()  |
 
 ## Device Web API Endpoints
 
-| Method | Path               | Description                                     |
-|:-------|:-------------------|:------------------------------------------------|
-| GET    | `/`                | Bus departures WebUI (PROGMEM HTML + JS)        |
-| GET    | `/api/state`       | Cached stop data (re-serialised, mirrors NAS)   |
-| GET    | `/api/stops`       | Current stop ID/name array                      |
-| POST   | `/api/stops`       | Update stop list (JSON array) + queue refresh   |
-| POST   | `/api/stops/reset` | Restore default stops + queue refresh           |
-| GET    | `/mirror`          | Redirect to `/`                                 |
+| Method | Path         | Description                                     |
+|:-------|:-------------|:------------------------------------------------|
+| GET    | `/`          | Bus departures WebUI (PROGMEM HTML + JS)        |
+| GET    | `/api/state` | Cached stop data (re-serialised, mirrors NAS)   |
+| GET    | `/mirror`    | Redirect to `/`                                 |
 
 ## WebUI (`/`)
 
-PROGMEM-embedded dark-themed dashboard served by AsyncWebServer. Combines live bus
-departure display with a stop configuration editor.
+PROGMEM-embedded dark-themed dashboard served by AsyncWebServer. Mirrors the
+client's current local state for inspection in a browser.
 
 Features:
 - Live bus departures with real-time badges, delay pills, day labels
-- "Edit stops" toggle for modifying stop IDs and names
-- Save and reset buttons with status feedback
 - Auto-polls `/api/state` every 15s, re-renders every 5s
 - Link to raw JSON at `/api/state`
 
@@ -206,7 +201,7 @@ Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
 1. `initDisplay()` — TFT + backlight
 2. `initWiFi()` — WiFiManager with optional secrets.h seed
 3. `initTime()` — ezTime NTP sync (30s timeout)
-4. `initStopConfig()` — load stops from NVS or use defaults
+4. `initStopConfig()` — seed compiled stop defaults until NAS sync
 5. `initBusApi()` — zero stop data arrays
 6. `initWebServer()` — AsyncWebServer routes
 7. `initOTA()` — ArduinoOTA with status bar feedback
@@ -220,7 +215,7 @@ Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
 - `STOP_COUNT = 4` is the display slot maximum — NAS can have fewer; unused slots show "No data"
 - Stop names from NAS > 23 chars are silently truncated (`STOP_NAME_MAX = 24`)
 - NAS URL is stored in NVS namespace `busstop2` — differs from v1 `busstop` intentionally
-- Stop config is stored in NVS namespace `busstop` — separate from NAS URL
+- The stop list is not persisted locally; it is replaced by the server response order on each successful NAS fetch
 - `fetchAllStops()` blocks loop() for ~50-200ms (LAN HTTP); acceptable vs v1's ~10s TLS
 - Built-in fonts require explicit `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FONT4=1` build flags
 - `handleWebServer()` is a no-op — AsyncWebServer is fully event-driven, but the call is kept for future use

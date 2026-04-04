@@ -73,7 +73,7 @@ Both `.env` and `secrets.h` are gitignored. Templates: `server/.env.example` and
 ## Deployment
 
 - **Server**: Copy `server/` contents to NAS, configure `.env`, build via Container Manager
-- **Client**: `pio run -d client/ -t upload && pio run -d client/ -t uploadfs`
+- **Client**: `pio run -d client/ -t upload`
 - Full NAS deployment guide in [README.md](README.md)
 
 ## Conventions

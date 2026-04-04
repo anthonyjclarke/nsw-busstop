@@ -9,7 +9,6 @@
 #include <WiFi.h>
 
 static AsyncWebServer server(WEB_PORT);
-static volatile bool s_stopRefreshRequested = false;
 
 // ---------------------------------------------------------------------------
 // Route handlers
@@ -62,77 +61,6 @@ static void handleApiState(AsyncWebServerRequest* req) {
   req->send(200, "application/json", body);
 }
 
-// GET /api/stops
-static void handleApiStops(AsyncWebServerRequest* req) {
-  StaticJsonDocument<1024> doc;
-  JsonArray stops = doc.to<JsonArray>();
-
-  for (uint8_t i = 0; i < STOP_COUNT; i++) {
-    JsonObject stop = stops.createNestedObject();
-    stop["id"]   = stopIds[i];
-    stop["name"] = stopNames[i];
-  }
-
-  String body;
-  serializeJson(doc, body);
-  req->send(200, "application/json", body);
-}
-
-static void handleApiStopsUpdate(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  StaticJsonDocument<2048> doc;
-  DeserializationError err = deserializeJson(doc, data, len);
-  if (err) {
-    DBG_WARN("/api/stops POST JSON parse failed: %s", err.c_str());
-    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-    return;
-  }
-
-  if (!doc.is<JsonArray>()) {
-    req->send(400, "application/json", "{\"error\":\"Expected JSON array\"}");
-    return;
-  }
-
-  JsonArray arr = doc.as<JsonArray>();
-  if (arr.size() > STOP_COUNT) {
-    req->send(400, "application/json", "{\"error\":\"Too many stops\"}");
-    return;
-  }
-
-  bool anyChanged = false;
-  for (uint8_t i = 0; i < STOP_COUNT; i++) {
-    if (i < arr.size()) {
-      JsonObject obj = arr[i].as<JsonObject>();
-      const char* id = obj["id"];
-      const char* name = obj["name"];
-      if (!id || !name || strlen(id) == 0 || strlen(name) == 0 || strlen(id) >= STOP_ID_MAX || strlen(name) >= STOP_NAME_MAX) {
-        req->send(400, "application/json", "{\"error\":\"Invalid stop id/name\"}");
-        return;
-      }
-      bool idChanged = (strcmp(stopIds[i], id) != 0);
-      bool nameChanged = (strcmp(stopNames[i], name) != 0);
-      if (idChanged || nameChanged) {
-        DBG_INFO("Stop config change[%d]: id '%s' -> '%s', name '%s' -> '%s'",
-                 i, stopIds[i], id, stopNames[i], name);
-        anyChanged = true;
-      }
-      setStopConfig(i, id, name);
-    } else {
-      // If fewer entries, keep existing or defaults. Keep previous values.
-    }
-  }
-
-  if (!anyChanged) {
-    DBG_INFO("Stop config: POST received but no stop values changed");
-  }
-
-  if (!saveStopConfig()) {
-    DBG_WARN("/api/stops POST: saveStopConfig failed");
-  }
-
-  s_stopRefreshRequested = true;
-  req->send(200, "application/json", "{\"result\":\"ok\",\"refresh\":\"queued\"}");
-}
-
 // GET /
 // Dashboard — polls /api/state every 60s, recalculates minutes every 15s client-side.
 static const char ROOT_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
@@ -173,77 +101,8 @@ h1{font-size:1.2em;margin-bottom:.15em}
 <div id="alerts"></div>
 <div id="stops">Loading...</div>
 <div class="ft"><a href="/api/state">JSON</a></div>
-<div class="ft"><button id="btnToggleEdit" onclick="toggleEditPane()">Edit stops</button></div>
-<div id="stopConfig" style="display:none;margin-top:.8em;background:#222;border:1px solid #444;border-radius:6px;padding:.8em;">
-  <h2 style="font-size:1em;margin-bottom:.4em;">Edit stops</h2>
-  <div id="stopConfigRows"></div>
-  <div style="margin-top:.5em;display:flex;gap:.5em;align-items:center;">
-    <button onclick="saveStopConfig()">Save</button>
-    <button onclick="resetStopConfig()">Reset defaults</button>
-    <span id="configStatus" style="color:#8f8;font-size:.85em;"></span>
-  </div>
-</div>
 <script>
-var D=null,fetched=0,stopsConfig=[];
-function toggleEditPane(){
-  var pane=document.getElementById('stopConfig');
-  pane.style.display = (pane.style.display==='none'?'block':'none');
-}
-function renderStopConfigRows(){
-  var rows=document.getElementById('stopConfigRows');
-  if (!Array.isArray(stopsConfig) || stopsConfig.length===0) {
-    rows.innerHTML='<div class="nd">No stop data</div>';
-    return;
-  }
-  var h='';
-  stopsConfig.forEach(function(s,i){
-    h += '<div style="margin-bottom:.4em;display:flex;gap:.4em;align-items:center;">';
-    h += '<input id="stopId'+i+'" style="flex:1;" value="'+(s.id||'')+'" placeholder="Stop ID">';
-    h += '<input id="stopName'+i+'" style="flex:2;" value="'+(s.name||'')+'" placeholder="Stop name">';
-    h += '</div>';
-  });
-  rows.innerHTML = h;
-}
-function loadStopConfig(){
-  fetch('/api/stops').then(function(r){return r.json();}).then(function(arr){
-    stopsConfig = arr;
-    renderStopConfigRows();
-  }).catch(function(err){
-    document.getElementById('configStatus').textContent='Load failed';
-    console.warn(err);
-  });
-}
-function saveStopConfig(){
-  var payload=[];
-  for(var i=0;i<stopsConfig.length;i++){
-    var idInput=document.getElementById('stopId'+i);
-    var nameInput=document.getElementById('stopName'+i);
-    if (!idInput || !nameInput) continue;
-    payload.push({id:idInput.value.trim(),name:nameInput.value.trim()});
-  }
-  fetch('/api/stops',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-  .then(function(){
-    document.getElementById('configStatus').textContent='Saved';
-    loadStopConfig();
-    fetchAndRender();
-  }).catch(function(e){
-    document.getElementById('configStatus').textContent='Save failed';
-    console.warn(e);
-  });
-}
-function resetStopConfig(){
-  fetch('/api/stops/reset',{method:'POST'})
-  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-  .then(function(){
-    document.getElementById('configStatus').textContent='Reset';
-    loadStopConfig();
-    fetchAndRender();
-  }).catch(function(e){
-    document.getElementById('configStatus').textContent='Reset failed';
-    console.warn(e);
-  });
-}
+var D=null,fetched=0;
 function fetchAndRender(){
   fetch('/api/state').then(function(r){return r.json();}).then(function(d){
     D=d;fetched=Date.now();render();
@@ -318,7 +177,6 @@ function poll(){
   fetchAndRender();
 }
 
-loadStopConfig();
 poll();
 setInterval(poll,15000);
 setInterval(render,5000);
@@ -341,16 +199,6 @@ static void handleMirror(AsyncWebServerRequest* req) {
 void initWebServer() {
   server.on("/",          HTTP_GET, handleRoot);
   server.on("/api/state", HTTP_GET, handleApiState);
-  server.on("/api/stops", HTTP_GET, handleApiStops);
-  server.on("/api/stops", HTTP_POST, [](AsyncWebServerRequest* req){}, nullptr, handleApiStopsUpdate);
-  server.on("/api/stops/reset", HTTP_POST, [](AsyncWebServerRequest* req){
-    if (!resetStopConfig() || !saveStopConfig()) {
-      req->send(500, "application/json", "{\"error\":\"reset failed\"}");
-      return;
-    }
-    s_stopRefreshRequested = true;
-    req->send(200, "application/json", "{\"result\":\"reset\",\"refresh\":\"queued\"}");
-  });
   server.on("/mirror",    HTTP_GET, handleMirror);
 
   server.begin();
@@ -360,10 +208,4 @@ void initWebServer() {
 void handleWebServer() {
   // AsyncWebServer handles requests via interrupt — nothing needed here.
   // ArduinoOTA is handled in loop() via main.cpp.
-}
-
-bool consumeStopRefreshRequest() {
-  bool requested = s_stopRefreshRequested;
-  s_stopRefreshRequested = false;
-  return requested;
 }
