@@ -6,7 +6,9 @@
 // Stop configuration
 // ---------------------------------------------------------------------------
 constexpr uint8_t     STOP_COUNT          = 4;
-constexpr uint8_t     DEPARTURES_PER_STOP = 3;
+constexpr uint8_t     DEPARTURES_PER_STOP = 3;  // Fixed ESP32 cache + TFT rows
+constexpr uint8_t     WEBUI_DEPARTURES_MIN = 1;
+constexpr uint8_t     WEBUI_DEPARTURES_MAX = 8;
 
 constexpr uint8_t STOP_ID_MAX   = 16;
 constexpr uint8_t STOP_NAME_MAX = 24;
