@@ -46,7 +46,7 @@ TFT_eSPI tft = TFT_eSPI();
 static void drawDividers() {
   tft.drawFastHLine(0,      HEADER_H - 1,        320, COL_DIVIDER);  // below header
   tft.drawFastHLine(0,      HEADER_H + PANEL_H,  320, COL_DIVIDER);  // mid horizontal
-  tft.drawFastVLine(PANEL_W, HEADER_H,            240, COL_DIVIDER);  // mid vertical
+  tft.drawFastVLine(PANEL_W, HEADER_H,            240 - HEADER_H, COL_DIVIDER);  // mid vertical
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +126,9 @@ void drawStopPanel(uint8_t idx) {
     } else if (dep.minutesUntil <= 0) {
       strncpy(minsStr, "Now", sizeof(minsStr));
       tft.setTextColor(TFT_ORANGE, COL_BG);
+    } else if (dep.minutesUntil >= 60) {
+      snprintf(minsStr, sizeof(minsStr), "%dh%02dm", dep.minutesUntil / 60, dep.minutesUntil % 60);
+      tft.setTextColor(COL_MINS_FAR, COL_BG);
     } else {
       snprintf(minsStr, sizeof(minsStr), "%dm", dep.minutesUntil);
       tft.setTextColor((dep.minutesUntil < 10) ? COL_MINS_NEAR : COL_MINS_FAR, COL_BG);
@@ -151,12 +154,18 @@ void drawStatusBar(const char* msg, uint16_t colour) {
   tft.drawString(msg, PAD_X, 222, 2);
 }
 
-void drawLastUpdated(const char* timeStr) {
+void drawLastUpdated(const char* timeStr, bool serverOffline) {
   // Sits at y=224–239 — the 16px gap below the last departure row in the
   // lower panels. Panel fillRect clears this area on every drawAllStops(),
   // so no background fill is needed here.
   char buf[12];
   snprintf(buf, sizeof(buf), "upd %s", timeStr);
+
+  if (serverOffline) {
+    tft.setTextColor(TFT_RED, COL_BG);
+    tft.drawString("SERVER OFFLINE", PAD_X, 224, 2);
+  }
+
   tft.setTextColor(COL_DATE_FG, COL_BG);
   tft.drawRightString(buf, 320 - PAD_X, 224, 2);
 }

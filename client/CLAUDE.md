@@ -1,135 +1,226 @@
-# CYD_BusStop_NSW — Project Context
+# CYD_BusStop_NSW Client — Project Context
+
+## IMPORTANT: This is the client component
+
+This ESP32 firmware is the **client** half of a server/client architecture.
+It fetches pre-processed bus data from the companion server (`../server/`).
+The server must be running on your local network for this device to display any data.
+
+- **Server component:** [../server/](../server/) — Python FastAPI on Synology NAS
+- **Monorepo context:** [../CLAUDE.md](../CLAUDE.md)
 
 ## What It Does
 
-Displays the next 3 bus departures for 4 NSW stops near Ryde/Putney, fetched from the
-TfNSW Trip Planner API. Shows a live time/date header on the TFT and a live web
-dashboard at `/` with editable stops, delay indicators, real-time badges, and alerts.
+Displays the next 3 bus departures for up to 4 NSW stops near Ryde/Putney on the
+CYD TFT display. Departure data is fetched from a local NAS server (Python FastAPI
+at `192.168.1.100:8081`) rather than calling TfNSW directly. Stop configuration is
+managed via the NAS dashboard or the device's built-in WebUI stop editor.
 
 ## Target Hardware
 
 ESP32-2432S028R (CYD 2.8") — ILI9341, 240x320, no PSRAM.
 Standard CYD pin assignments apply — see global CLAUDE.md.
 
-## Stop Configuration
+## Architecture
 
-| Stop ID | Display Name     |
-|:--------|:-----------------|
-| 2112130 | To Gladesville   |
-| 2112131 | To Meadowbank Stn |
-| 211267  | End of Small St  |
-| 211271  | To Macquarie Park |
+```
+[TfNSW API] --> [NAS server :8081] --> [ESP32 GET /api/state]
+                       ^
+               (stop config, polling,
+                JSON normalisation)
+```
 
-Defaults defined in `config.h`. At runtime, the active stop list is stored in NVS
-and can be edited from the WebUI "Edit stops" pane.
+**Critical:** The ESP32 device is now a **thin client**. All TfNSW API integration, stop configuration, and data processing happens on the server. The ESP32 only fetches pre-processed JSON and renders it.
 
-## API
+## NAS Server
 
-**Provider:** TfNSW Open Data — Trip Planner APIs (Departure Monitor)
-**Registration:** opendata.transport.nsw.gov.au — sign in → My Account →
-Applications → Add Application → request **Trip Planner APIs** product.
-Key available on the application detail page once approved.
-**Endpoint:** `https://api.transport.nsw.gov.au/v1/tp/departure_mon`
+| Detail        | Value                                     |
+|:--------------|:------------------------------------------|
+| Default URL   | `http://192.168.1.100:8081`               |
+| NVS key       | `nasUrl` in namespace `busstop2`          |
+| Endpoint      | `GET /api/state` -> JSON payload          |
+| Poll interval | 60 s                                      |
+| Auth          | Optional Bearer token via `SECRET_NAS_API_KEY` |
 
-| Detail        | Value                                 |
-|:--------------|:--------------------------------------|
-| Auth header   | `Authorization: apikey <key>`         |
-| Key constant  | `SECRET_TFNSW_API_KEY` in `secrets.h` |
-| Poll interval | 60 s · 4 requests · 500 ms gap        |
-| Response size | ~60 KB per stop (chunked transfer)    |
-| Parsing       | `DeChunkStream` — zero-copy JSON      |
-| Timestamps    | UTC from API; local via `myTZ`        |
+NAS URL is editable at runtime via `setNasUrl()` and persisted in NVS.
 
-Parsed departure fields: route, destination, estimated epoch, planned epoch,
-delay (seconds), real-time flag, and optional alert subtitle. Departures are
-collected (up to 8), sorted by estimated epoch, and the 3 soonest are kept.
+## NAS JSON Schema (`/api/state`)
+
+```json
+{
+  "time": "10:30:00",
+  "date": "Fri, 4 Apr",
+  "now": 1743742200,
+  "tzOff": 36000,
+  "lastRefresh": "2026-04-04T10:30:00+10:00",
+  "lastError": null,
+  "stops": [
+    {
+      "id": "2112130",
+      "name": "To Gladesville",
+      "valid": true,
+      "fetch_age": 45,
+      "alert": "",
+      "departures": [
+        { "route": "500", "clock": "10:35", "minutes": 5,
+          "epoch": 1743742500, "rt": true, "delay": 120, "dest": "Circular Quay" }
+      ]
+    }
+  ]
+}
+```
 
 ## Module Structure
 
-| File                    | Purpose                                              |
-|:------------------------|:-----------------------------------------------------|
-| `src/main.cpp`          | setup(), loop(), init orchestration, bus refresh      |
-| `src/display.cpp/.h`    | All TFT drawing — header, panels, status bar         |
-| `src/bus_api.cpp/.h`    | TfNSW API fetch, JSON parse, sort, StopData structs  |
-| `src/time_mgr.cpp/.h`   | ezTime NTP init, time/date/day helpers, TZ offset    |
-| `src/web_server.cpp/.h` | AsyncWebServer routes, WebUI, `/api/state`, refresh Q |
-| `src/config.cpp`        | Stop config: NVS load/save/reset, runtime arrays     |
-| `include/config.h`      | All tuneable constants + stop config declarations    |
-| `include/debug.h`       | Levelled debug macros with wall-clock timestamps     |
+| File                     | Purpose                                              |
+|:-------------------------|:-----------------------------------------------------|
+| `src/main.cpp`           | setup(), loop(), init orchestration, bus refresh      |
+| `src/display.cpp/.h`     | All TFT drawing — header, panels, status bar         |
+| `src/bus_api.cpp/.h`     | NAS fetch, JSON parse, StopData/Departure structs    |
+| `src/time_mgr.cpp/.h`    | ezTime NTP init, time/date/day helpers, TZ offset    |
+| `src/web_server.cpp/.h`  | AsyncWebServer, PROGMEM WebUI, stop/state API        |
+| `src/config.cpp`         | Stop config + NAS URL: NVS load/save                 |
+| `src/debug.cpp`          | `dbgTimestamp()` — wall-clock or uptime fallback      |
+| `include/config.h`       | Tuneable constants + NAS config declarations         |
+| `include/debug.h`        | Levelled debug macros with wall-clock timestamps     |
+| `include/secrets.h`      | Gitignored — WiFi creds + NAS API key                |
+
+## Key Data Structures (`bus_api.h`)
+
+```cpp
+struct Departure {
+  char   route[8];         // e.g. "501"
+  char   clockTime[6];     // local HH:MM from NAS
+  char   destination[32];  // e.g. "Gladesville - Jordan St"
+  time_t epochUTC;         // departure UTC epoch
+  int    minutesUntil;     // refreshed by recalcMinutes() every 15s
+  int    delaySecs;        // positive = late, negative = early
+  bool   isRealtime;       // true = live GPS, false = scheduled
+  bool   valid;
+};
+
+struct StopData {
+  Departure departures[3]; // DEPARTURES_PER_STOP
+  uint8_t   count;
+  bool      valid;         // at least one departure
+  bool      hasAlerts;
+  char      alertText[64];
+  uint32_t  lastFetchMs;   // millis() of last NAS fetch
+};
+```
 
 ## Fonts
 
-Currently using TFT_eSPI built-in fonts (requires `-DLOAD_FONT2=1 -DLOAD_FONT4=1`):
+Using TFT_eSPI built-in fonts (requires `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FONT4=1`):
 - Font 4 (26px) — header time
 - Font 2 (16px) — stop names, departure rows, status bar
 
-Upgrade path when ready: generate NotoSansBold VLW fonts via Processing
-`Create_Smooth_Font` sketch, place in `src/fonts/`, and swap `drawString(..., 2/4)`
-calls in `display.cpp` for `loadFont` / `drawString` / `unloadFont` pattern.
+**Note:** This departs from the global CLAUDE.md VLW-only rule. Built-in fonts are
+used deliberately here to save flash space.
 
 ## Display Layout
 
-Landscape 320x240. Header 28px, then 2x2 grid of stop panels.
-Each panel: stop name + 3 departure rows.
-Each departure row: route, real-time indicator (`●`/`~`), minutes or day
-abbreviation (for non-today departures), and clock time.
-Footer area shows `upd HH:MM` after successful fetch.
+Landscape 320x240. Header 28px, then 2x2 grid of stop panels (160x106 each).
+
+Each panel: stop name (cyan) + up to 3 departure rows.
+Each row: route (white), real-time indicator (filled circle=green/`~`=grey), minutes or day abbr, clock time.
+
+Minutes display logic:
+- `<=0`: "Now" (orange)
+- `1-59`: "{n}m" (green if <10, yellow if >=10)
+- `>=60`: "{h}h{mm}m" (yellow)
+- Non-today departures: 3-letter day abbreviation (grey, e.g. "Mon")
+
+Footer: `upd HH:MM` — dim grey, bottom-right corner, updated on each NAS fetch.
 
 ## Refresh Strategy
 
-| What             | Interval | Mechanism                                  |
-|:-----------------|:---------|:-------------------------------------------|
-| TFT clock header | 1s       | ezTime `events()` tick + `drawHeader()`    |
-| TFT stop panels  | 15s      | `recalcMinutes()` from stored epoch + draw |
-| API fetch        | 60s      | `fetchAllStops()` — 4 HTTPS requests       |
-| WebUI render     | 5s       | Client-side JS recalc from epoch           |
-| WebUI API poll   | 15s      | `fetch('/api/state')` from browser         |
-| WebUI stop edit  | on-demand| `consumeStopRefreshRequest()` in loop()    |
+| What             | Interval | Mechanism                                |
+|:-----------------|:---------|:-----------------------------------------|
+| TFT clock header | 1 s      | ezTime `events()` + `drawHeader()`       |
+| TFT stop panels  | 15 s     | `recalcMinutes()` from stored epoch      |
+| NAS fetch        | 60 s     | `fetchAllStops()` — single HTTP GET      |
+| WebUI poll       | 15 s     | `fetch('/api/state')` from browser JS    |
+| Stop config edit | on-demand| `consumeStopRefreshRequest()` in loop()  |
 
-## Web API Endpoints
+## Device Web API Endpoints
 
-| Method | Path               | Description                                          |
-|:-------|:-------------------|:-----------------------------------------------------|
-| GET    | `/`                | Live web dashboard + stop editor                     |
-| GET    | `/api/state`       | JSON: time, date, UTC epoch, TZ offset, stop data    |
-| GET    | `/api/stops`       | JSON array of current stop id/name pairs             |
-| POST   | `/api/stops`       | Update stop list (JSON array); persists + queues refresh |
-| POST   | `/api/stops/reset` | Restore default stops; persists + queues refresh     |
-| GET    | `/mirror`          | Redirects to `/`                                     |
+| Method | Path               | Description                                     |
+|:-------|:-------------------|:------------------------------------------------|
+| GET    | `/`                | Bus departures WebUI (PROGMEM HTML + JS)        |
+| GET    | `/api/state`       | Cached stop data (re-serialised, mirrors NAS)   |
+| GET    | `/api/stops`       | Current stop ID/name array                      |
+| POST   | `/api/stops`       | Update stop list (JSON array) + queue refresh   |
+| POST   | `/api/stops/reset` | Restore default stops + queue refresh           |
+| GET    | `/mirror`          | Redirect to `/`                                 |
 
-`/api/state` fields: `time`, `date`, `now` (UTC epoch), `tzOff` (seconds),
-`stops[]` with optional `alert`, and per-departure `route`, `clock`, `minutes`,
-`epoch`, `rt` (bool), `delay` (seconds), and optional `dest`.
+## WebUI (`/`)
 
-## Build Phases
+PROGMEM-embedded dark-themed dashboard served by AsyncWebServer. Combines live bus
+departure display with a stop configuration editor.
 
-- **Phase 1** ✓: WiFi + NTP + API fetch + display + web dashboard + OTA
-- **Phase 2** ✓ (partial): NVS stop config persistence + web stop editor UI +
-  richer departure metadata (RT, delay, destination, alerts, day labels)
-- **Phase 2** (remaining): Full `/config` page (poll interval, brightness, timezone)
-- **Phase 3**: Canvas display mirror at `/mirror` using `/api/state` JSON
+Features:
+- Live bus departures with real-time badges, delay pills, day labels
+- "Edit stops" toggle for modifying stop IDs and names
+- Save and reset buttons with status feedback
+- Auto-polls `/api/state` every 15s, re-renders every 5s
+- Link to raw JSON at `/api/state`
+
+## Secrets (`include/secrets.h`)
+
+Gitignored. Template at `include/secrets.h.example`. Three defines required:
+
+```cpp
+#define SECRET_WIFI_SSID    "your-ssid"
+#define SECRET_WIFI_PASS    "your-password"
+#define SECRET_NAS_API_KEY  ""   // Bearer token for NAS auth (empty = no auth)
+```
+
+## Libraries (from `platformio.ini`)
+
+| Library                              | Purpose                     |
+|:-------------------------------------|:----------------------------|
+| `bodmer/TFT_eSPI@^2.4.76`           | TFT display driver          |
+| `tzapu/WiFiManager`                  | Captive portal provisioning |
+| `ropg/ezTime`                        | NTP + timezone handling     |
+| `bblanchon/ArduinoJson@^6.21.0`     | JSON parse/serialise        |
+| `mathieucarbou/AsyncTCP#v3.3.2`      | Async TCP (GitHub ref)      |
+| `mathieucarbou/ESPAsyncWebServer#v3.4.0` | Async web server (GitHub ref) |
+
+ArduinoOTA is framework built-in (no lib_dep entry needed).
+
+## Building & Flashing
+
+Firmware upload only (no filesystem upload needed — WebUI is PROGMEM-embedded):
+
+```sh
+pio run -t upload          # from client/
+pio run -d client/ -t upload   # from monorepo root
+```
+
+Upload speed: 230400 baud. Port: auto-detected by PlatformIO.
+Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
+
+## Init Sequence (`setup()`)
+
+1. `initDisplay()` — TFT + backlight
+2. `initWiFi()` — WiFiManager with optional secrets.h seed
+3. `initTime()` — ezTime NTP sync (30s timeout)
+4. `initStopConfig()` — load stops from NVS or use defaults
+5. `initBusApi()` — zero stop data arrays
+6. `initWebServer()` — AsyncWebServer routes
+7. `initOTA()` — ArduinoOTA with status bar feedback
+8. First `performBusRefresh()` — fetch + draw
+9. Initial header draw + log free heap
 
 ## Known Issues / Notes
 
-- CYD has no PSRAM — no framebuffer mirror possible; web mirror will use JS canvas
-- `setInsecure()` used on WiFiClientSecure — acceptable for device, not prod cloud
-- `mktime()` on ESP32 Arduino treats struct tm as UTC — `parseISODatetime()` relies on this
-- TfNSW API ignores `&limit=6` parameter — always returns full result set (~60KB)
-- `DeChunkStream` handles the chunked responses with zero heap buffer overhead
-- `DeChunkStream::_timedRead()` still uses `delay(1)` — should be `yield()` (tracked)
-- Built-in fonts require explicit `-DLOAD_FONT2=1` / `-DLOAD_FONT4=1` in build flags
-- `fetchAllStops()` blocks the loop for ~10s (4 HTTPS requests with TLS) — OTA
-  and web requests are unresponsive during this window; FreeRTOS task planned
-- Stop config web editor has no client-side validation — server rejects invalid
-  input (length checks) but no UI feedback yet; tracked in CHANGELOG enhancements
-- `TIME_24HR_DEFAULT = false` → header displays 12hr format (e.g. "2:35 PM");
-  set to `true` in `config.h` for 24hr ("14:35")
-- WebUI stop edit uses `consumeStopRefreshRequest()` to defer fetch to the main
-  loop — keeps the async web handler non-blocking
-- TfNSW `occupancy` field is not populated on Ryde/Putney routes — confirmed absent
-  via diagnostic fetch; not worth implementing
-
-## Flashing
-
-Port: auto-detected by PlatformIO. No special flags needed.
-After WiFiManager provisioning, device hostname: `cyd-busstop` (mDNS + OTA).
+- CYD has no PSRAM — no framebuffer; display is write-only
+- `TIME_24HR_DEFAULT = false` — 12hr clock; set `true` in `config.h` for 24hr
+- `STOP_COUNT = 4` is the display slot maximum — NAS can have fewer; unused slots show "No data"
+- Stop names from NAS > 23 chars are silently truncated (`STOP_NAME_MAX = 24`)
+- NAS URL is stored in NVS namespace `busstop2` — differs from v1 `busstop` intentionally
+- Stop config is stored in NVS namespace `busstop` — separate from NAS URL
+- `fetchAllStops()` blocks loop() for ~50-200ms (LAN HTTP); acceptable vs v1's ~10s TLS
+- Built-in fonts require explicit `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FONT4=1` build flags
+- `handleWebServer()` is a no-op — AsyncWebServer is fully event-driven, but the call is kept for future use

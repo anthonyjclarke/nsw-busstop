@@ -5,108 +5,10 @@
 #include "../include/secrets.h"
 
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
-#include <time.h>
 
 StopData stopData[STOP_COUNT];
-
-// ---------------------------------------------------------------------------
-// De-chunking stream wrapper
-// ---------------------------------------------------------------------------
-// The TfNSW API always responds with chunked transfer-encoding (even with
-// HTTP/1.0). getStream() returns raw chunks with hex framing — unusable by
-// ArduinoJson.  This wrapper strips the chunk framing so the consumer sees
-// a clean byte stream.  Memory cost: ~20 bytes on the stack.
-
-class DeChunkStream : public Stream {
-  Stream& _src;
-  size_t  _remain;   // bytes left in the current chunk
-  bool    _eof;
-
-  bool _nextChunk() {
-    // Each chunk: <hex-size>\r\n<data>\r\n
-    // Final chunk: 0\r\n\r\n
-    char buf[12];
-    uint8_t i = 0;
-    while (i < sizeof(buf) - 1) {
-      int c = _timedRead();
-      if (c < 0)   { _eof = true; return false; }
-      if (c == '\r') { _timedRead(); break; }   // consume \n
-      buf[i++] = (char)c;
-    }
-    buf[i] = '\0';
-    _remain = strtoul(buf, nullptr, 16);
-    if (_remain == 0) { _eof = true; return false; }
-    return true;
-  }
-
-  int _timedRead() {
-    unsigned long start = millis();
-    while (!_src.available()) {
-      if (millis() - start > 10000) return -1;
-      delay(1);
-    }
-    return _src.read();
-  }
-
-public:
-  DeChunkStream(Stream& src) : _src(src), _remain(0), _eof(false) {}
-
-  int available() override { return _eof ? 0 : (_remain ? _remain : 1); }
-
-  int read() override {
-    if (_eof) return -1;
-    if (_remain == 0 && !_nextChunk()) return -1;
-    int c = _timedRead();
-    if (c < 0) { _eof = true; return -1; }
-    _remain--;
-    if (_remain == 0) {
-      _timedRead();  // consume \r after chunk body
-      _timedRead();  // consume \n
-    }
-    return c;
-  }
-
-  int    peek()             override { return _src.peek(); }
-  size_t write(uint8_t)     override { return 0; }
-  void   flush()            override {}
-};
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-// Parse an ISO 8601 datetime string ("2024-03-15T10:48:00+11:00") to UTC epoch.
-// mktime() on ESP32 Arduino treats struct tm as UTC, so we subtract the
-// offset embedded in the string to arrive at UTC.
-static time_t parseISODatetime(const char* s) {
-  int  Y, M, D, h, m, sec;
-  int  tzh = 0, tzm = 0;
-  char sign = '+';
-
-  int parsed = sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d%c%2d:%2d",
-                      &Y, &M, &D, &h, &m, &sec, &sign, &tzh, &tzm);
-
-  if (parsed < 6) {
-    DBG_WARN("parseISODatetime: bad format: %s", s);
-    return 0;
-  }
-
-  struct tm t = {};
-  t.tm_year = Y - 1900;
-  t.tm_mon  = M - 1;
-  t.tm_mday = D;
-  t.tm_hour = h;
-  t.tm_min  = m;
-  t.tm_sec  = sec;
-
-  time_t epoch      = mktime(&t);  // treated as UTC on ESP32 Arduino
-  int    offsetSecs = tzh * 3600 + tzm * 60;
-
-  return (sign == '-') ? epoch + offsetSecs : epoch - offsetSecs;
-}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -117,187 +19,128 @@ void initBusApi() {
   DBG_INFO("Bus API initialised — %d stops configured", STOP_COUNT);
 }
 
-bool fetchStop(uint8_t idx) {
-  if (idx >= STOP_COUNT) return false;
-
+bool fetchAllStops() {
   if (WiFi.status() != WL_CONNECTED) {
-    DBG_WARN("fetchStop[%d]: WiFi not connected", idx);
+    DBG_WARN("fetchAllStops: WiFi not connected");
     return false;
   }
 
-  // Build URL
-  String url = TFNSW_API_BASE;
-  url += "&name_dm=";
-  url += stopIds[idx];
+  String nasUrl = getNasUrl();
+  String apiUrl = nasUrl + "/api/state";
 
-  // Filter — ArduinoJson reads the full stream but only stores these fields.
-  StaticJsonDocument<512> filter;
-  filter["stopEvents"][0]["departureTimePlanned"]              = true;
-  filter["stopEvents"][0]["departureTimeEstimated"]            = true;
-  filter["stopEvents"][0]["isRealtimeControlled"]              = true;
-  filter["stopEvents"][0]["transportation"]["number"]          = true;
-  filter["stopEvents"][0]["transportation"]["destination"]["name"] = true;
-  filter["stopEvents"][0]["infos"][0]["subtitle"]              = true;
-
-  WiFiClientSecure client;
-  client.setInsecure();
-
+  WiFiClient client;  // Plain HTTP for LAN
   HTTPClient http;
-  http.begin(client, url);
-  http.addHeader("Authorization", "apikey " SECRET_TFNSW_API_KEY);
-  http.setTimeout(15000);
+  http.begin(client, apiUrl);
+  http.setTimeout(10000);
 
+  // Add auth header if API key is configured
+  if (strlen(SECRET_NAS_API_KEY) > 0) {
+    http.addHeader("Authorization", String("Bearer ") + SECRET_NAS_API_KEY);
+  }
+
+  DBG_INFO("Fetching from NAS: %s", apiUrl.c_str());
   int code = http.GET();
+
   if (code != HTTP_CODE_OK) {
-    DBG_WARN("fetchStop[%d] HTTP %d", idx, code);
+    DBG_WARN("NAS fetch failed: HTTP %d", code);
     http.end();
     return false;
   }
 
   int contentLen = http.getSize();
-  bool chunked   = (contentLen < 0);
-  DBG_INFO("fetchStop[%d] %s, heap: %u, maxBlk: %u",
-           idx, chunked ? "chunked" : String(String(contentLen) + " bytes").c_str(),
-           ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-
-  // Parse JSON directly from the network stream — only filter doc + TLS buffers
-  // are in memory.  Increase buffer in case API is larger than expected.
-  const size_t JSON_DOC_SIZE = 8192;
-  DynamicJsonDocument doc(JSON_DOC_SIZE);
-  DeserializationError err;
-
-  if (chunked) {
-    DeChunkStream dcs(http.getStream());
-    err = deserializeJson(doc, dcs, DeserializationOption::Filter(filter));
+  char lenBuf[16];
+  if (contentLen < 0) {
+    strcpy(lenBuf, "chunked");
   } else {
-    err = deserializeJson(doc, http.getStream(),
-                          DeserializationOption::Filter(filter));
+    snprintf(lenBuf, sizeof(lenBuf), "%d bytes", contentLen);
   }
+  DBG_INFO("NAS response: %s, heap: %u", lenBuf, ESP.getFreeHeap());
+
+  // Parse JSON directly from stream — NAS response is ~2KB for 4 stops
+  StaticJsonDocument<4096> doc;
+
+  DeserializationError err = deserializeJson(doc, http.getStream());
   http.end();
 
   if (err) {
-    DBG_ERROR("fetchStop[%d] JSON: %s", idx, err.c_str());
+    DBG_ERROR("NAS JSON parse error: %s", err.c_str());
     return false;
   }
 
-  // Parse stop events
-  JsonArray events = doc["stopEvents"].as<JsonArray>();
-  if (events.isNull()) {
-    DBG_WARN("fetchStop[%d]: no stopEvents in response", idx);
+  // Parse stops array
+  JsonArray stops = doc["stops"];
+  if (stops.isNull()) {
+    DBG_WARN("NAS response: no stops array");
     return false;
   }
 
-  time_t  nowUTC = getUTCNow();
+  // Clear existing data
+  memset(stopData, 0, sizeof(stopData));
 
-  memset(&stopData[idx], 0, sizeof(StopData));
+  // Populate stopData from NAS response
+  for (JsonObject stop : stops) {
+    const char* stopId = stop["id"];
+    if (!stopId) continue;
 
-  // Check for service alerts — capture first alert subtitle if present
-  for (JsonObject ev : events) {
-    JsonArray infos = ev["infos"].as<JsonArray>();
-    if (!infos.isNull() && infos.size() > 0) {
-      const char* subtitle = infos[0]["subtitle"];
-      if (subtitle && strlen(subtitle) > 0) {
-        stopData[idx].hasAlerts = true;
-        strncpy(stopData[idx].alertText, subtitle, sizeof(stopData[idx].alertText) - 1);
-        stopData[idx].alertText[sizeof(stopData[idx].alertText) - 1] = '\0';
-        break;  // one alert is enough
+    // Find matching stop index by ID
+    int8_t idx = -1;
+    for (uint8_t i = 0; i < STOP_COUNT; i++) {
+      if (strcmp(stopIds[i], stopId) == 0) {
+        idx = i;
+        break;
       }
     }
-  }
-
-  // Collect up to MAX_COLLECT future departures, then sort and keep top 3.
-  // The API can return events out of estimated-time order when buses run
-  // early or late, so we need to sort by actual estimated epoch.
-  constexpr uint8_t MAX_COLLECT = 8;
-  Departure collected[MAX_COLLECT];
-  uint8_t numCollected = 0;
-
-  for (JsonObject ev : events) {
-    if (numCollected >= MAX_COLLECT) break;
-
-    const char* estStr     = ev["departureTimeEstimated"];
-    const char* plannedStr = ev["departureTimePlanned"];
-    const char* dtStr      = estStr ? estStr : plannedStr;
-    if (!dtStr) continue;
-
-    time_t depEpoch = parseISODatetime(dtStr);
-    if (depEpoch == 0) continue;
-
-    int mins = (int)((depEpoch - nowUTC) / 60);
-    if (mins < 0) continue;
-
-    Departure& dep   = collected[numCollected];
-    memset(&dep, 0, sizeof(Departure));
-    dep.epochUTC     = depEpoch;
-    dep.minutesUntil = mins;
-
-    // Planned time and delay calculation
-    if (plannedStr) {
-      dep.epochPlanned = parseISODatetime(plannedStr);
-      if (estStr && dep.epochPlanned > 0) {
-        dep.delaySecs = (int)(depEpoch - dep.epochPlanned);
-      }
+    if (idx == -1) {
+      DBG_WARN("NAS stop ID %s not configured locally", stopId);
+      continue;
     }
 
-    dep.isRealtime = ev["isRealtimeControlled"] | false;
+    StopData& sd = stopData[idx];
+    sd.valid = stop["valid"] | true;  // default true if missing
+    sd.lastFetchMs = millis();
 
-    formatLocalHHMM(depEpoch, dep.clockTime, sizeof(dep.clockTime));
-
-    const char* routeNum = ev["transportation"]["number"];
-    if (routeNum) {
-      strncpy(dep.route, routeNum, sizeof(dep.route) - 1);
+    // Copy stop name if provided
+    const char* name = stop["name"];
+    if (name) {
+      strncpy(stopNames[idx], name, STOP_NAME_MAX - 1);
+      stopNames[idx][STOP_NAME_MAX - 1] = '\0';
     }
 
-    const char* destName = ev["transportation"]["destination"]["name"];
-    if (destName) {
-      strncpy(dep.destination, destName, sizeof(dep.destination) - 1);
+    // Parse departures
+    JsonArray deps = stop["departures"];
+    sd.count = min((size_t)DEPARTURES_PER_STOP, deps.size());
+
+    for (uint8_t j = 0; j < sd.count; j++) {
+      JsonObject dep = deps[j];
+      Departure& d = sd.departures[j];
+
+      const char* route = dep["route"];
+      if (route) strncpy(d.route, route, sizeof(d.route) - 1);
+
+      const char* clock = dep["clock"];
+      if (clock) strncpy(d.clockTime, clock, sizeof(d.clockTime) - 1);
+
+      const char* dest = dep["dest"];
+      if (dest) strncpy(d.destination, dest, sizeof(d.destination) - 1);
+
+      d.epochUTC = dep["epoch"] | 0;
+      d.minutesUntil = dep["minutes"] | 0;
+      d.delaySecs = dep["delay"] | 0;
+      d.isRealtime = dep["rt"] | false;
+
+      d.valid = true;
     }
 
-    dep.valid = true;
-    numCollected++;
-  }
-
-  // Sort collected departures by estimated epoch (soonest first)
-  for (uint8_t i = 0; i < numCollected; i++) {
-    for (uint8_t j = i + 1; j < numCollected; j++) {
-      if (collected[j].epochUTC < collected[i].epochUTC) {
-        Departure tmp = collected[i];
-        collected[i] = collected[j];
-        collected[j] = tmp;
-      }
+    // Handle alerts
+    const char* alert = stop["alert"];
+    if (alert && strlen(alert) > 0) {
+      sd.hasAlerts = true;
+      strncpy(sd.alertText, alert, sizeof(sd.alertText) - 1);
     }
   }
 
-  // Copy the top DEPARTURES_PER_STOP into stopData
-  uint8_t count = (numCollected < DEPARTURES_PER_STOP) ? numCollected : DEPARTURES_PER_STOP;
-  for (uint8_t i = 0; i < count; i++) {
-    stopData[idx].departures[i] = collected[i];
-  }
-
-  stopData[idx].count       = count;
-  stopData[idx].valid       = (count > 0);
-  stopData[idx].lastFetchMs = millis();
-
-  DBG_INFO("Stop %s — %d departure(s):", stopNames[idx], count);
-  for (uint8_t i = 0; i < count; i++) {
-    const Departure& d = stopData[idx].departures[i];
-    int delayMin = d.delaySecs / 60;
-    DBG_INFO("  [%d] Route %-6s  %dm  %s  %s  delay:%+dm  %s",
-             i + 1, d.route, d.minutesUntil, d.clockTime,
-             d.isRealtime ? "RT" : "sched",
-             delayMin, d.destination);
-  }
-  return stopData[idx].valid;
-}
-
-void fetchAllStops() {
-  DBG_INFO("Fetching all %d stops...", STOP_COUNT);
-  for (uint8_t i = 0; i < STOP_COUNT; i++) {
-    fetchStop(i);
-    if (i < STOP_COUNT - 1) {
-      delay(INTER_REQUEST_MS);
-    }
-  }
+  DBG_INFO("NAS fetch complete: %d stops updated", stops.size());
+  return true;
 }
 
 void recalcMinutes() {
@@ -311,4 +154,3 @@ void recalcMinutes() {
     }
   }
 }
-
