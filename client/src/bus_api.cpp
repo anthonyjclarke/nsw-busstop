@@ -77,34 +77,25 @@ bool fetchAllStops() {
   // Clear existing data
   memset(stopData, 0, sizeof(stopData));
 
-  // Populate stopData from NAS response
+  // Populate stopData directly in server-provided order so the NAS remains
+  // the single source of truth for the displayed stop list.
+  uint8_t idx = 0;
   for (JsonObject stop : stops) {
-    const char* stopId = stop["id"];
-    if (!stopId) continue;
-
-    // Find matching stop index by ID
-    int8_t idx = -1;
-    for (uint8_t i = 0; i < STOP_COUNT; i++) {
-      if (strcmp(stopIds[i], stopId) == 0) {
-        idx = i;
-        break;
-      }
+    if (idx >= STOP_COUNT) {
+      DBG_WARN("NAS returned more than %d stops; extra stops ignored", STOP_COUNT);
+      break;
     }
-    if (idx == -1) {
-      DBG_WARN("NAS stop ID %s not configured locally", stopId);
+
+    const char* stopId = stop["id"];
+    const char* name = stop["name"];
+    if (!stopId || !name || !setStopConfig(idx, stopId, name)) {
+      DBG_WARN("NAS stop[%d]: invalid id/name payload", idx);
       continue;
     }
 
     StopData& sd = stopData[idx];
     sd.valid = stop["valid"] | true;  // default true if missing
     sd.lastFetchMs = millis();
-
-    // Copy stop name if provided
-    const char* name = stop["name"];
-    if (name) {
-      strncpy(stopNames[idx], name, STOP_NAME_MAX - 1);
-      stopNames[idx][STOP_NAME_MAX - 1] = '\0';
-    }
 
     // Parse departures
     JsonArray deps = stop["departures"];
@@ -137,6 +128,8 @@ bool fetchAllStops() {
       sd.hasAlerts = true;
       strncpy(sd.alertText, alert, sizeof(sd.alertText) - 1);
     }
+
+    idx++;
   }
 
   DBG_INFO("NAS fetch complete: %d stops updated", stops.size());
