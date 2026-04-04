@@ -224,7 +224,7 @@
       </div>
       <div class="actions">
         <button onclick="loadState()">Refresh</button>
-        {% if runtime_config.authEnabled %}
+        {% if auth_enabled %}
         <form method="post" action="/logout">
           <button type="submit">Sign out</button>
         </form>
@@ -243,54 +243,49 @@
     </div>
 
     <div id="tab-settings" class="tab-panel">
-      <div class="card config">
-        <h2>Runtime Config</h2>
-        <p class="meta">{{ runtime_config.configSource }}</p>
-        <div class="config-grid">
-          <div class="config-item">
-            <div class="config-label">Auth</div>
-            <div class="config-value">{{ "enabled" if runtime_config.authEnabled else "disabled" }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Username</div>
-            <div class="config-value">{{ runtime_config.username }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Password</div>
-            <div class="config-value">{{ runtime_config.passwordMask }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">TfNSW API Key</div>
-            <div class="config-value">{{ runtime_config.tfnswKeyMask }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Session Secret</div>
-            <div class="config-value">{{ runtime_config.sessionSecretMask }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Timezone</div>
-            <div class="config-value">{{ runtime_config.timezone }}</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Poll Interval</div>
-            <div class="config-value">{{ runtime_config.pollIntervalSeconds }} seconds</div>
-          </div>
-          <div class="config-item">
-            <div class="config-label">Port</div>
-            <div class="config-value">{{ runtime_config.port }}</div>
-          </div>
-        </div>
-      </div>
-
       <div class="card editor" id="editor">
         <h2>Stop Editor</h2>
-        <p class="meta">Dynamic stop list persisted in SQLite. Future ESP32 clients will consume this API over HTTP.</p>
+        <p class="meta">Stop list persisted in SQLite. ESP32 clients sync on each poll.</p>
         <div id="editorRows"></div>
         <div class="actions">
           <button onclick="addRow()">Add stop</button>
           <button class="primary" onclick="saveStops()">Save stops</button>
         </div>
         <div id="saveStatus" class="status"></div>
+      </div>
+
+      <div class="card config">
+        <h2>Server Status</h2>
+        <div class="config-grid">
+          <div class="config-item">
+            <div class="config-label">Container Uptime</div>
+            <div class="config-value">{{ server_status.uptime }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Configured Stops</div>
+            <div class="config-value">{{ server_status.stopCount }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Last Poll</div>
+            <div class="config-value">{{ server_status.lastRefresh or "pending" }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Last Error</div>
+            <div class="config-value">{{ server_status.lastError or "none" }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Timezone</div>
+            <div class="config-value">{{ server_status.timezone }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Poll Interval</div>
+            <div class="config-value">{{ server_status.pollIntervalSeconds }}s</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Python</div>
+            <div class="config-value">{{ server_status.pythonVersion }}</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

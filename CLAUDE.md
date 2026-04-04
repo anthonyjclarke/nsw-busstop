@@ -55,13 +55,13 @@ Changes to this schema must be coordinated across both components.
 
 | Secret             | Location                          | Purpose                     |
 |:-------------------|:----------------------------------|:----------------------------|
-| TfNSW API key      | `server/.env` (NAS only)          | TfNSW departure API access  |
-| NAS auth creds     | `server/.env` (NAS only)          | Dashboard login             |
-| NAS API key        | `server/.env` + `client/secrets.h`| Bearer token for `/api/state` |
+| TfNSW API key      | `server/app/.env` (NAS only)          | TfNSW departure API access  |
+| NAS auth creds     | `server/app/.env` (NAS only)          | Dashboard login             |
+| NAS API key        | `server/app/.env` + `client/secrets.h`| Bearer token for `/api/state` |
 | WiFi credentials   | `client/include/secrets.h`        | WiFiManager seed            |
 
-Both `.env` and `secrets.h` are gitignored. Templates: `server/.env.example` and
-`client/include/secrets.h.example`.
+Both `.env` and `secrets.h` are gitignored. Templates: `server/.env.example`
+(copy to `server/app/.env`) and `client/include/secrets.h.example`.
 
 ## Development
 

@@ -1,7 +1,5 @@
 #pragma once
 
 // Initialise AsyncWebServer routes. Call after WiFi is connected.
+// AsyncWebServer is fully event-driven — no per-loop handler needed.
 void initWebServer();
-
-// No-op — AsyncWebServer is event-driven. Kept for future use.
-void handleWebServer();
