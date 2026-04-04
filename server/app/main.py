@@ -15,10 +15,11 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import settings
+from app.config import CLIENT_DEPARTURES_PER_STOP, settings
 from app.db import get_session, init_db
-from app.models import AppStatePayload, StopInput
+from app.models import AppStatePayload, DashboardConfigInput, StopInput
 from app.services.auth import SESSION_KEY, authenticate, is_authenticated
+from app.services.server_config import get_dashboard_config, set_dashboard_departures_per_stop
 from app.services.stops import list_stops, replace_stops
 from app.services.tfnsw import fetch_state
 
@@ -80,9 +81,11 @@ def _format_uptime(delta) -> str:
 def _server_status() -> dict[str, Any]:
     with get_session() as session:
         stop_count = len(list_stops(session))
+        dashboard_config = get_dashboard_config(session)
     return {
         "uptime": _format_uptime(datetime.now(UTC) - _started_at),
         "stopCount": stop_count,
+        "dashboardDeparturesPerStop": dashboard_config.departures_per_stop,
         "lastRefresh": app.state.last_refresh.isoformat() if app.state.last_refresh else None,
         "lastError": app.state.last_error,
         "timezone": settings.timezone,
@@ -91,13 +94,15 @@ def _server_status() -> dict[str, Any]:
     }
 
 
-def _with_live_minutes(payload: AppStatePayload) -> dict[str, Any]:
+def _with_live_minutes(payload: AppStatePayload, departure_limit: int | None = None) -> dict[str, Any]:
     data = payload.model_dump()
     local_now = _local_now()
     data["time"] = local_now.strftime("%H:%M:%S")
     data["date"] = _date_label(local_now)
     data["now"] = int(local_now.astimezone(UTC).timestamp())
     for stop in data["stops"]:
+        if departure_limit is not None:
+            stop["departures"] = stop["departures"][:departure_limit]
         for dep in stop["departures"]:
             dep["minutes"] = max(0, int((dep["epoch"] - data["now"]) // 60))
     return data
@@ -160,12 +165,18 @@ async def logout(request: Request) -> RedirectResponse:
 async def dashboard(request: Request) -> HTMLResponse:
     if settings.auth_enabled and not is_authenticated(request):
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
-    payload = _with_live_minutes(app.state.state_payload)
+    with get_session() as session:
+        dashboard_config = get_dashboard_config(session)
+    payload = _with_live_minutes(
+        app.state.state_payload,
+        dashboard_config.departures_per_stop,
+    )
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "payload": payload,
+            "dashboard_departures_per_stop": dashboard_config.departures_per_stop,
             "poll_interval_seconds": settings.poll_interval_seconds,
             "timezone": settings.timezone,
             "auth_enabled": settings.auth_enabled,
@@ -178,7 +189,18 @@ async def dashboard(request: Request) -> HTMLResponse:
 async def api_state(request: Request) -> JSONResponse:
     if settings.auth_enabled and not is_authenticated(request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-    return JSONResponse(_with_live_minutes(app.state.state_payload))
+    # Keep the ESP32 contract fixed at 3 departures per stop.
+    return JSONResponse(_with_live_minutes(app.state.state_payload, CLIENT_DEPARTURES_PER_STOP))
+
+
+@app.get("/api/dashboard-state")
+async def api_dashboard_state(request: Request, session: Session = Depends(session_dep)) -> JSONResponse:
+    if settings.auth_enabled and not is_authenticated(request):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    dashboard_config = get_dashboard_config(session)
+    payload = _with_live_minutes(app.state.state_payload, dashboard_config.departures_per_stop)
+    payload["dashboardDeparturesPerStop"] = dashboard_config.departures_per_stop
+    return JSONResponse(payload)
 
 
 @app.get("/api/stops")
@@ -189,6 +211,29 @@ async def api_stops(request: Request, session: Session = Depends(session_dep)) -
         {"id": stop.stop_id, "name": stop.name}
         for stop in list_stops(session)
     ]
+
+
+@app.get("/api/dashboard-config")
+async def api_dashboard_config(request: Request, session: Session = Depends(session_dep)) -> dict[str, int]:
+    if settings.auth_enabled and not is_authenticated(request):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    config = get_dashboard_config(session)
+    return {"departuresPerStop": config.departures_per_stop}
+
+
+@app.post("/api/dashboard-config")
+async def api_set_dashboard_config(
+    request: Request,
+    dashboard_config: DashboardConfigInput,
+    session: Session = Depends(session_dep),
+) -> dict[str, int | str]:
+    if settings.auth_enabled and not is_authenticated(request):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    config = set_dashboard_departures_per_stop(session, dashboard_config.departures_per_stop)
+    return {
+        "result": "ok",
+        "departuresPerStop": config.departures_per_stop,
+    }
 
 
 @app.post("/api/stops")

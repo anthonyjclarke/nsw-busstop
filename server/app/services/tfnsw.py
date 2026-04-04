@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.config import settings
+from app.config import MAX_TFNSW_DEPARTURES_PER_STOP, settings
 from app.models import AppStatePayload, Departure, StopConfig, StopState
 
 
@@ -21,7 +21,6 @@ TFNSW_URL = (
     "&TfNSWDM=true"
     "&version=10.2.1.42"
     "&depArr=dep"
-    "&limit=6"
 )
 
 
@@ -42,7 +41,7 @@ def _parse_iso_to_local(value: str) -> datetime:
 
 async def _fetch_stop(client: httpx.AsyncClient, stop: StopConfig, now_local: datetime) -> StopState:
     """Fetch departures for a single stop from TfNSW."""
-    params_url = f"{TFNSW_URL}&name_dm={stop.stop_id}"
+    params_url = f"{TFNSW_URL}&name_dm={stop.stop_id}&limit={MAX_TFNSW_DEPARTURES_PER_STOP}"
     response = await client.get(params_url)
     response.raise_for_status()
     payload = response.json()
@@ -83,7 +82,6 @@ async def _fetch_stop(client: httpx.AsyncClient, stop: StopConfig, now_local: da
         )
 
     departures.sort(key=lambda dep: dep.epoch)
-    departures = departures[:3]
 
     return StopState(
         id=stop.stop_id,

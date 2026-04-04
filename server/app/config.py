@@ -11,6 +11,10 @@ DEFAULT_STOPS = [
     ("211271", "To Macquarie Park"),
 ]
 
+CLIENT_DEPARTURES_PER_STOP = 3
+DEFAULT_DASHBOARD_DEPARTURES_PER_STOP = 3
+MAX_TFNSW_DEPARTURES_PER_STOP = 8
+
 
 @dataclass(frozen=True)
 class Settings:

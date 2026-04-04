@@ -3,7 +3,8 @@
 A real-time Sydney bus departure display system built around the **Transport for
 NSW Trip Planner API**. A small FastAPI server polls TfNSW every 60 seconds and
 serves a normalised JSON feed to an ESP32 CYD (Cheap Yellow Display) that shows
-the next three departures for four configured stops on its TFT screen.
+the next three departures for four configured stops on its TFT screen, while
+the server WebUI can be configured to show 1 to 8 departures per stop.
 
 ```
 [TfNSW API] → [FastAPI server on NAS :8081] → [ESP32 client · CYD TFT]
@@ -45,12 +46,14 @@ truth for the stop list and departure data the client consumes.
 
 ### Server stop editor
 
-![Server stop configuration](images/server-stops-edit.png)
+![Server configuration](images/server-config.png)
 
 Server-side stop editor on the **Settings** tab. Add, rename, or replace the
 configured stop IDs; changes are persisted to SQLite and feed the next
-`/api/state` response. Client stop editing has been removed — all stop
-configuration lives on the server.
+`/api/state` response. The server WebUI also supports a persisted 1 to 8
+rows-per-stop display slider while the ESP32 remains fixed at 3 departures.
+Client stop editing has been removed — all stop configuration lives on the
+server.
 
 ---
 
@@ -67,6 +70,9 @@ configuration lives on the server.
   last poll failed
 - **Server-side stop management** — edit the configured stops from the server
   dashboard; the ESP32 mirrors the list on its next poll
+- **Configurable server WebUI rows** — choose 1 to 8 departures per stop on
+  the server dashboard; the ESP32 `/api/state` feed stays fixed at 3 for
+  compatibility
 - **Device config page** — edit the NAS URL on the ESP32 from its own `/config`
   page; see live system stats (uptime, WiFi RSSI, heap, build, etc.)
 - **Docker-native server** — runs as a single container on a Synology DS423+
@@ -81,7 +87,8 @@ configuration lives on the server.
 ### Server (`server/`)
 
 Python/FastAPI application. Polls TfNSW, stores stop configuration in SQLite,
-serves a web dashboard + JSON API. Runs as a Docker container.
+serves a web dashboard + JSON API. The server dashboard supports a persisted 1
+to 8 departures-per-stop setting. Runs as a Docker container.
 
 - **Tech:** Python 3.12, FastAPI, SQLModel, SQLite, httpx, Jinja2
 - **Port:** 8081
@@ -90,7 +97,8 @@ serves a web dashboard + JSON API. Runs as a Docker container.
 ### Client (`client/`)
 
 ESP32 Arduino firmware for the CYD 2.8" TFT. Fetches JSON from the server and
-renders a 2x2 grid of bus stop panels with live countdowns.
+renders a 2x2 grid of bus stop panels with live countdowns. The ESP32 remains
+fixed at 3 departures per stop even when the server WebUI is configured higher.
 
 - **Tech:** ESP32 Arduino, TFT_eSPI, ArduinoJson, ezTime, ESPAsyncWebServer
 - **Hardware:** ESP32-2432S028R (CYD 2.8"), ILI9341 240x320
