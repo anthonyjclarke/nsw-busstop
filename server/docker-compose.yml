@@ -1,0 +1,15 @@
+services:
+  nsw-busstop-server:
+    build:
+      context: .
+    container_name: nsw-busstop-server
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8081}:${PORT:-8081}"
+    volumes:
+      - nsw-busstop-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  nsw-busstop-data:

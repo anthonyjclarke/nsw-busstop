@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NSW BusStop Server</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #0c1218;
+      --panel: #18212a;
+      --panel-2: #121920;
+      --text: #eef5fb;
+      --muted: #8ea4b6;
+      --accent: #53d0ff;
+      --warn: #ffb347;
+      --late: #ffa640;
+      --early: #7dff8a;
+      --ok: #7bf0a5;
+      --border: #2e414f;
+    }
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(83, 208, 255, 0.18), transparent 22%),
+        linear-gradient(180deg, #0a0f14, #111a22 55%, #0b1218);
+      color: var(--text);
+      padding: 20px;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.6rem); }
+    .meta { color: var(--muted); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .tab-button.active {
+      background: #ff8a00;
+      color: #1a1203;
+      border-color: #ff8a00;
+      font-weight: 700;
+    }
+    .tab-panel {
+      display: none;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+    button {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .primary { background: #ff8a00; color: #1a1203; border: 0; font-weight: 700; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(24, 33, 42, 0.96), rgba(16, 24, 31, 0.96));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 18px 34px rgba(0, 0, 0, 0.18);
+    }
+    .stop-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .stop-name { color: var(--accent); font-weight: 700; }
+    .stop-id { color: var(--muted); font-size: 0.85rem; }
+    .stop-link {
+      color: inherit;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .stop-link:hover .stop-name,
+    .stop-link:hover .stop-id {
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .dep {
+      display: grid;
+      grid-template-columns: 52px 90px minmax(0, 1fr) max-content;
+      gap: 10px;
+      align-items: start;
+      padding: 8px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.95rem;
+    }
+    .dep:first-of-type { border-top: 0; }
+    .route { font-weight: 700; }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      border-radius: 999px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+    }
+    .rt { color: var(--ok); border-color: #28513c; background: rgba(25, 72, 43, 0.3); }
+    .sched { color: #9ea9b5; }
+    .dest {
+      color: var(--muted);
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .timing {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .mins-near { color: var(--ok); }
+    .mins-far { color: #ffe38c; }
+    .mins-now { color: var(--warn); }
+    .delay-late, .delay-early {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    .delay-late { background: rgba(79, 44, 6, 0.52); color: var(--late); }
+    .delay-early { background: rgba(11, 57, 21, 0.52); color: var(--early); }
+    .alert {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(76, 51, 13, 0.45);
+      color: #ffd089;
+      font-size: 0.9rem;
+    }
+    .editor {
+      margin-top: 18px;
+    }
+    .config {
+      margin-bottom: 18px;
+    }
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .config-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    .config-label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 4px;
+    }
+    .config-value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-word;
+    }
+    .error-banner {
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(98, 33, 18, 0.75);
+      border: 1px solid rgba(201, 95, 67, 0.55);
+      color: #ffd0c5;
+    }
+    .editor-row {
+      display: grid;
+      grid-template-columns: minmax(120px, 180px) 1fr auto;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .status { color: var(--muted); margin-top: 10px; }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+      .dep { grid-template-columns: 52px 90px minmax(0, 1fr); }
+      .timing { grid-column: 1 / -1; text-align: left; }
+      .editor-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>Bus Departures</h1>
+        <div class="meta">
+          <span id="clock">{{ payload.time }}</span>
+          <span> | </span>
+          <span id="date">{{ payload.date }}</span>
+          <span> | {{ timezone }}</span>
+          <span> | Last refresh: <span id="lastRefresh">{{ payload.lastRefresh or "pending" }}</span></span>
+        </div>
+      </div>
+      <div class="actions">
+        <button onclick="loadState()">Refresh</button>
+        {% if runtime_config.authEnabled %}
+        <form method="post" action="/logout">
+          <button type="submit">Sign out</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-button active" data-tab="departures" onclick="setTab('departures')">Departures</button>
+      <button class="tab-button" data-tab="settings" onclick="setTab('settings')">Settings</button>
+    </div>
+
+    <div id="tab-departures" class="tab-panel active">
+      <div id="errorBanner"></div>
+      <div id="grid" class="grid"></div>
+    </div>
+
+    <div id="tab-settings" class="tab-panel">
+      <div class="card config">
+        <h2>Runtime Config</h2>
+        <p class="meta">{{ runtime_config.configSource }}</p>
+        <div class="config-grid">
+          <div class="config-item">
+            <div class="config-label">Auth</div>
+            <div class="config-value">{{ "enabled" if runtime_config.authEnabled else "disabled" }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Username</div>
+            <div class="config-value">{{ runtime_config.username }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Password</div>
+            <div class="config-value">{{ runtime_config.passwordMask }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">TfNSW API Key</div>
+            <div class="config-value">{{ runtime_config.tfnswKeyMask }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Session Secret</div>
+            <div class="config-value">{{ runtime_config.sessionSecretMask }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Timezone</div>
+            <div class="config-value">{{ runtime_config.timezone }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Poll Interval</div>
+            <div class="config-value">{{ runtime_config.pollIntervalSeconds }} seconds</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Port</div>
+            <div class="config-value">{{ runtime_config.port }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card editor" id="editor">
+        <h2>Stop Editor</h2>
+        <p class="meta">Dynamic stop list persisted in SQLite. Future ESP32 clients will consume this API over HTTP.</p>
+        <div id="editorRows"></div>
+        <div class="actions">
+          <button onclick="addRow()">Add stop</button>
+          <button class="primary" onclick="saveStops()">Save stops</button>
+        </div>
+        <div id="saveStatus" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let state = {{ payload | tojson }};
+    let currentTab = "departures";
+
+    function delayHtml(seconds) {
+      const minutes = Math.round(seconds / 60);
+      if (minutes >= 2) return `<div class="delay-late">+${minutes}m late</div>`;
+      if (minutes <= -2) return `<div class="delay-early">${Math.abs(minutes)}m early</div>`;
+      return "";
+    }
+
+    function minutesClass(minutes) {
+      if (minutes <= 0) return "mins-now";
+      if (minutes < 10) return "mins-near";
+      return "mins-far";
+    }
+
+    function formatWait(minutes) {
+      if (minutes <= 0) return "Now";
+      if (minutes > 60) {
+        const hours = Math.floor(minutes / 60);
+        const remainder = minutes % 60;
+        return remainder === 0 ? `${hours}h` : `${hours}h${remainder}m`;
+      }
+      return `${minutes}m`;
+    }
+
+    function formatRefreshLabel(isoString) {
+      if (!isoString) return "pending";
+
+      const refreshed = new Date(isoString);
+      if (Number.isNaN(refreshed.getTime())) return isoString;
+
+      const now = new Date();
+      const diffSeconds = Math.max(0, Math.floor((now.getTime() - refreshed.getTime()) / 1000));
+
+      let age;
+      if (diffSeconds < 60) {
+        age = `${diffSeconds}s ago`;
+      } else if (diffSeconds < 3600) {
+        age = `${Math.floor(diffSeconds / 60)}m ago`;
+      } else {
+        const hours = Math.floor(diffSeconds / 3600);
+        const minutes = Math.floor((diffSeconds % 3600) / 60);
+        age = minutes > 0 ? `${hours}h${minutes}m ago` : `${hours}h ago`;
+      }
+
+      const timeLabel = refreshed.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit"
+      });
+
+      return `${timeLabel} (${age})`;
+    }
+
+    function renderStops() {
+      document.getElementById("clock").textContent = state.time;
+      document.getElementById("date").textContent = state.date;
+      document.getElementById("lastRefresh").textContent = formatRefreshLabel(state.lastRefresh);
+      document.getElementById("errorBanner").innerHTML = state.lastError
+        ? `<div class="error-banner">${state.lastError}</div>`
+        : "";
+
+      const grid = document.getElementById("grid");
+      grid.innerHTML = "";
+
+      function stopUrl(stopId) {
+        return `https://transportnsw.info/${encodeURIComponent(stopId)}`;
+      }
+
+      state.stops.forEach((stop) => {
+        const card = document.createElement("section");
+        card.className = "card";
+
+        const deps = (stop.departures || []).map((dep) => `
+          <div class="dep">
+            <div class="route">${dep.route || "--"}</div>
+            <div><span class="badge ${dep.rt ? "rt" : "sched"}">${dep.rt ? "LIVE" : "SCHED"}</span></div>
+            <div class="dest">${dep.dest || "Destination unavailable"}</div>
+            <div class="timing">
+              <div class="${minutesClass(dep.minutes)}">${formatWait(dep.minutes)} · ${dep.clock}</div>
+              ${delayHtml(dep.delay)}
+            </div>
+          </div>
+        `).join("");
+
+        card.innerHTML = `
+          <div class="stop-head">
+            <div>
+              <a class="stop-link" href="${stopUrl(stop.id)}" target="_blank" rel="noreferrer">
+                <div class="stop-name">${stop.name}</div>
+                <div class="stop-id">${stop.id}</div>
+              </a>
+            </div>
+          </div>
+          ${deps || '<div class="meta">No upcoming departures</div>'}
+          ${stop.alert ? `<div class="alert">${stop.alert}</div>` : ""}
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function setTab(tabName) {
+      currentTab = tabName;
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.tab === tabName);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === `tab-${tabName}`);
+      });
+      if (tabName === "settings") {
+        loadStops();
+      }
+    }
+
+    function renderEditor(stops) {
+      const rows = document.getElementById("editorRows");
+      rows.innerHTML = "";
+      stops.forEach((stop) => {
+        const row = document.createElement("div");
+        row.className = "editor-row";
+        row.innerHTML = `
+          <input type="text" class="stop-id" value="${stop.id || ""}" placeholder="Stop ID">
+          <input type="text" class="stop-name" value="${stop.name || ""}" placeholder="Stop name">
+          <button type="button" onclick="this.parentElement.remove()">Remove</button>
+        `;
+        rows.appendChild(row);
+      });
+    }
+
+    function addRow() {
+      const rows = document.getElementById("editorRows");
+      const row = document.createElement("div");
+      row.className = "editor-row";
+      row.innerHTML = `
+        <input type="text" class="stop-id" placeholder="Stop ID">
+        <input type="text" class="stop-name" placeholder="Stop name">
+        <button type="button" onclick="this.parentElement.remove()">Remove</button>
+      `;
+      rows.appendChild(row);
+    }
+
+    async function loadStops() {
+      const response = await fetch("/api/stops");
+      const stops = await response.json();
+      renderEditor(stops);
+    }
+
+    async function saveStops() {
+      const rows = document.querySelectorAll(".editor-row");
+      const payload = Array.from(rows).map((row) => ({
+        stop_id: row.querySelector(".stop-id").value.trim(),
+        name: row.querySelector(".stop-name").value.trim()
+      })).filter((stop) => stop.stop_id && stop.name);
+
+      const response = await fetch("/api/stops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        document.getElementById("saveStatus").textContent = "Save failed";
+        return;
+      }
+
+      document.getElementById("saveStatus").textContent = "Saved";
+      await loadState();
+      await loadStops();
+    }
+
+    async function loadState() {
+      const response = await fetch("/api/state");
+      state = await response.json();
+      renderStops();
+    }
+
+    renderStops();
+    setInterval(loadState, {{ poll_interval_seconds * 1000 }});
+  </script>
+</body>
+</html>
