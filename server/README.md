@@ -1,26 +1,18 @@
 # NSW BusStop Server
 
-Standalone Docker project for managing TfNSW bus-stop data on the DS423 without changing the existing `CYD_BusStop_NSW` PlatformIO project.
+Python FastAPI server that polls TfNSW bus departure APIs and serves a live
+dashboard plus JSON endpoints. This is the **server** component of the
+[nsw-busstop](../README.md) monorepo. The companion ESP32 client
+([../client/](../client/)) fetches `/api/state` from this server.
 
-This app is designed as the future local source of truth for:
+## Features
 
-- TfNSW API polling
-- dynamic stop configuration
-- web dashboard and stop editor
-- JSON endpoints for future ESP32 display clients
-
-The existing ESP32 project remains untouched in `~/PlatformIO/Projects/CYD_BusStop_NSW`.
-
-## Current v1 scope
-
-- Python single-container app
-- FastAPI backend with server-rendered dashboard
-- SQLite persistence for stop configuration
-- auth toggle via `AUTH_ENABLED`
-- TfNSW polling with a current-style live departures dashboard
-- dynamic stop list seeded with the current Ryde/Putney defaults
-- Docker-managed named volume for persistent app data on Synology
-- dashboard shows masked live runtime config so active NAS settings are visible
+- TfNSW API polling every 60s with real-time departure data
+- Web dashboard with departure display, settings, and stop editor
+- SQLite persistence for stop configuration (Docker named volume)
+- JSON API for ESP32 client (`/api/state`, `/api/stops`)
+- Optional form-based authentication with session cookies
+- Single Docker container, designed for Synology DS423+ NAS
 
 ## Ports
 
@@ -111,31 +103,31 @@ nsw-busstop-server/
 └── .env.example
 ```
 
-## Synology note
+## Synology Deployment
 
-The compose file uses a Docker-managed named volume for `/app/data` instead of a relative bind mount. This avoids the common Synology Container Manager error:
+The compose file uses a Docker-managed named volume for `/app/data` instead of a
+relative bind mount. This avoids the common Synology Container Manager error:
 
 `Bind mount failed: '/volume1/docker-apps/nsw-busstop-server/data'`
 
-When you create or recreate the Synology project, make sure the selected project path is the real NAS folder containing:
+**Full step-by-step NAS deployment guide:** [../README.md](../README.md#synology-ds423-deployment-guide)
+
+When copying to the NAS, include these files in the project folder:
 
 - `docker-compose.yml`
-- `.env`
+- `.env` (created from `.env.example`)
 - `Dockerfile`
 - `requirements.txt`
 - `app/`
 
 ## API endpoints
 
-- `GET /health`
-- `GET /`
-- `GET /api/state`
-- `GET /api/stops`
-- `POST /api/stops`
+| Method | Path         | Auth    | Purpose                          |
+|:-------|:-------------|:--------|:---------------------------------|
+| GET    | `/health`    | No      | Health check JSON                |
+| GET    | `/`          | Yes\*   | Dashboard HTML                   |
+| GET    | `/api/state` | Yes\*   | Full state JSON (for ESP32)      |
+| GET    | `/api/stops` | Yes\*   | Stop list JSON                   |
+| POST   | `/api/stops` | Yes\*   | Replace all stops, trigger fetch |
 
-## Next planned phases
-
-1. Tighten auth and reverse-proxy support for external access
-2. Add richer health and diagnostics
-3. Add ESP32 client mode using HTTP polling
-4. Add optional cached history and admin features
+\* Only when `AUTH_ENABLED=true`

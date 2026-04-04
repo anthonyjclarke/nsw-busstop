@@ -1,7 +1,23 @@
-# Changelog
+# Changelog — CYD_BusStop_NSW Client
+
+**This project is a thin-client rewrite of the original CYD_BusStop_NSW.** The ESP32
+no longer calls TfNSW APIs directly. It fetches pre-processed bus data from a
+companion NAS server (`nsw-busstop-server` — Python FastAPI) over plain HTTP.
+The server must be running on your local network for this device to display any data.
 
 All notable changes to this project will be documented here.
 Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
+
+---
+
+## [0.4.0] 2026-04-04
+
+### Changed
+- Moved to monorepo: client now lives in `client/` alongside `server/`
+- Repository: `nsw-busstop` (was `CYD_BusStop_NSW`)
+- Server component included in same repo — no separate clone needed
+- Added `secrets.h.example` template for first-time setup
+- Rewrote README.md and CLAUDE.md for client-only context with cross-references
 
 ---
 

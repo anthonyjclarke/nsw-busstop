@@ -1,0 +1,10 @@
+{
+  "folders": [
+    { "path": "client", "name": "ESP32 Client" },
+    { "path": "server", "name": "FastAPI Server" },
+    { "path": ".", "name": "Monorepo Root" }
+  ],
+  "settings": {
+    "platformio-ide.projectDir": "client"
+  }
+}

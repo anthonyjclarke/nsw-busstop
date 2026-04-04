@@ -1,8 +1,13 @@
-# CLAUDE.md — nsw-busstop-server
+# CLAUDE.md — nsw-busstop server
+
+## Monorepo Context
+
+This is the **server** component of the [nsw-busstop](../README.md) monorepo.
+The companion ESP32 client lives at [../client/](../client/).
 
 ## What This Project Does
 
-A standalone Python/FastAPI web application that polls the Transport for NSW (TfNSW) API for real-time bus departures and serves a live dashboard. Designed to run as a single Docker container on a Synology DS423 NAS. Provides JSON API endpoints for a future ESP32 CYD display client (`CYD_BusStop_NSW`).
+A Python/FastAPI web application that polls the Transport for NSW (TfNSW) API for real-time bus departures and serves a live dashboard + JSON API. Designed to run as a single Docker container on a Synology DS423+ NAS. The ESP32 client fetches `/api/state` from this server.
 
 ## Tech Stack
 
@@ -17,7 +22,9 @@ A standalone Python/FastAPI web application that polls the Transport for NSW (Tf
 
 ## Deployment
 
-Target: Synology DS423 via Container Manager. Uses Docker-managed named volume (`nsw-busstop-data`) — not a bind mount — to avoid Synology path errors. Port 8081 by default.
+Target: Synology DS423+ via Container Manager. Uses Docker-managed named volume (`nsw-busstop-data`) — not a bind mount — to avoid Synology path errors. Port 8081 by default.
+
+Full NAS deployment guide: [../README.md](../README.md#synology-ds423-deployment-guide)
 
 ```sh
 docker compose up -d --build
