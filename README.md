@@ -39,7 +39,7 @@ with live countdowns.
 
 ```bash
 # Copy server/ to your NAS (see deployment guide below)
-# Configure .env with your TfNSW API key
+# Configure server/app/.env with your TfNSW API key
 # Build and start via Container Manager
 ```
 
@@ -49,7 +49,6 @@ with live countdowns.
 # Open nsw-busstop.code-workspace in VSCode
 # Create client/include/secrets.h from secrets.h.example
 pio run -d client/ -t upload       # Flash firmware
-pio run -d client/ -t uploadfs     # Upload WebUI to LittleFS
 ```
 
 ### 3. First boot
@@ -88,21 +87,22 @@ pio run -d client/ -t uploadfs     # Upload WebUI to LittleFS
 
 ### Step 2: Configure environment
 
-1. On the NAS, copy `.env.example` to `.env` in the same folder
-2. Edit `.env` with your settings:
+1. On the NAS, copy `.env.example` to `app/.env`
+2. Edit `app/.env` with your settings:
 
 ```env
 TFNSW_API_KEY=your-tfnsw-api-key-here
-AUTH_ENABLED=true
+AUTH_ENABLED=false
 APP_USERNAME=admin
 APP_PASSWORD=your-secure-password
 SESSION_SECRET=a-long-random-string
+NAS_API_KEY=
 TIMEZONE=Australia/Sydney
 POLL_INTERVAL_SECONDS=60
 PORT=8081
 ```
 
-The `.env` file lives **only on the NAS** — it is never committed to git.
+The `app/.env` file lives **only on the NAS** — it is never committed to git.
 
 ### Step 3: Build and start (Container Manager)
 
@@ -115,8 +115,8 @@ The `.env` file lives **only on the NAS** — it is never committed to git.
 7. Wait for the build to complete (first build takes 1-2 minutes)
 8. Verify: open `http://<nas-ip>:8081` in your browser
 
-You should see the bus departure dashboard. Configure your stops via the
-**Settings** tab.
+You should see the bus departure dashboard. Configure your stops directly on
+the dashboard page.
 
 ### Updating after code changes
 
@@ -125,7 +125,7 @@ When you pull new code from git and need to update the server on the NAS:
 1. On your Mac, pull the latest changes: `git pull`
 2. Copy the updated `server/` files to the NAS folder (same Finder method)
 
-   **Do NOT overwrite `.env`** — it contains your secrets and is the source
+   **Do NOT overwrite `app/.env`** — it contains your secrets and is the source
    of truth on the NAS.
 
 3. In Container Manager: **Project** > `nsw-busstop-server` > **Action** > **Build**
@@ -134,10 +134,10 @@ When you pull new code from git and need to update the server on the NAS:
 
 ### Using rsync (advanced)
 
-If you prefer the command line, use rsync to sync files while excluding `.env`:
+If you prefer the command line, use rsync to sync files while excluding `app/.env`:
 
 ```bash
-rsync -av --exclude '.env' --exclude '__pycache__' --exclude 'data/' \
+rsync -av --exclude 'app/.env' --exclude '__pycache__' --exclude 'data/' \
   server/ admin@<nas-ip>:/volume1/docker/<path>/nsw-busstop-server/
 ```
 
@@ -171,7 +171,7 @@ docker volume rm nsw-busstop-data
 | Variable               | Required | Default            | Purpose                      |
 |:-----------------------|:---------|:-------------------|:-----------------------------|
 | `TFNSW_API_KEY`        | Yes      | —                  | TfNSW API key                |
-| `AUTH_ENABLED`         | No       | `true`             | Enable dashboard login       |
+| `AUTH_ENABLED`         | No       | `false`            | Enable dashboard login       |
 | `APP_USERNAME`         | No       | `admin`            | Dashboard username           |
 | `APP_PASSWORD`         | Yes*     | `change-me`        | Dashboard password           |
 | `SESSION_SECRET`       | Yes*     | —                  | Cookie signing secret        |
@@ -185,10 +185,10 @@ docker volume rm nsw-busstop-data
 
 | Symptom                        | Fix                                                    |
 |:-------------------------------|:-------------------------------------------------------|
-| Container won't start          | Check `.env` exists and `TFNSW_API_KEY` is set         |
+| Container won't start          | Check `app/.env` exists and `TFNSW_API_KEY` is set     |
 | Dashboard shows no departures  | Verify API key is valid at TfNSW Open Data portal      |
-| Port conflict                  | Change `PORT` in `.env` and restart container          |
-| ESP32 shows HTTP 401           | Set `AUTH_ENABLED=false` in `.env`, or set `SECRET_NAS_API_KEY` on client |
+| Port conflict                  | Port `8081` is published directly in `docker-compose.yml`; if you need a different host port, edit the compose file and recreate the project |
+| ESP32 shows HTTP 401           | Set `AUTH_ENABLED=false` in `app/.env`, or set matching `NAS_API_KEY` / `SECRET_NAS_API_KEY` values |
 | "Bind mount failed"            | Ensure using named volume (default docker-compose.yml) |
 | Stops reset after rebuild      | Normal if volume was deleted; reconfigure in dashboard  |
 
@@ -203,7 +203,7 @@ nsw-busstop/
 │   ├── partitions_custom.csv
 │   ├── include/             # config.h, debug.h, secrets.h
 │   ├── src/                 # main.cpp, display, bus_api, etc.
-│   └── data/www/            # Device config WebUI (LittleFS)
+│   └── README.md
 │
 ├── server/                  # Python FastAPI server
 │   ├── Dockerfile
@@ -229,8 +229,8 @@ nsw-busstop/
 
 ```bash
 cd server
-cp .env.example .env
-# Edit .env with your TfNSW API key
+cp .env.example app/.env
+# Edit app/.env with your TfNSW API key
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8081
 ```
@@ -244,7 +244,6 @@ cp client/include/secrets.h.example client/include/secrets.h
 
 # Build and flash
 pio run -d client/ -t upload
-pio run -d client/ -t uploadfs
 ```
 
 ---

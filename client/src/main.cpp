@@ -15,12 +15,16 @@ static uint32_t s_lastPoll         = 0;
 static uint32_t s_lastClockUpdate  = 0;
 static uint32_t s_lastPanelRefresh = 0;
 static char     s_lastFetchStr[6]  = "--:--";  // local HH:MM of last API fetch
+static bool     s_serverOffline    = false;
 
 static void performBusRefresh() {
-  fetchAllStops();
-  formatLocalHHMM(getUTCNow(), s_lastFetchStr, sizeof(s_lastFetchStr));
+  bool ok = fetchAllStops();
+  s_serverOffline = !ok;
+  if (ok) {
+    formatLocalHHMM(getUTCNow(), s_lastFetchStr, sizeof(s_lastFetchStr));
+  }
   drawAllStops();
-  drawLastUpdated(s_lastFetchStr);
+  drawLastUpdated(s_lastFetchStr, s_serverOffline);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ void setup() {
 
   // Initial full draw
   drawHeader(getTimeStr(), getDateStr());
-  drawLastUpdated(s_lastFetchStr);
+  drawLastUpdated(s_lastFetchStr, s_serverOffline);
 
   s_lastPoll        = millis();
   s_lastClockUpdate = millis();
@@ -124,7 +128,7 @@ void loop() {
     s_lastPanelRefresh = now;
     recalcMinutes();
     drawAllStops();
-    drawLastUpdated(s_lastFetchStr);
+    drawLastUpdated(s_lastFetchStr, s_serverOffline);
   }
 
   // WebUI stop edits queue a refresh so the async request task stays non-blocking.

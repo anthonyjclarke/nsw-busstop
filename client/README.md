@@ -17,7 +17,7 @@ the TFT.
 - Real-time indicators: green dot = GPS-tracked, grey tilde = scheduled
 - "Now" label for imminent buses, day abbreviation for non-today departures
 - Live time/date header updated every second via NTP
-- Device config WebUI for NAS URL, brightness, refresh, and reboot
+- Device WebUI for cached state view and stop configuration
 
 ---
 
@@ -48,11 +48,9 @@ Edit `include/secrets.h` with your WiFi credentials and (optionally) the NAS API
 ```bash
 # From this directory:
 pio run -t upload        # Flash firmware
-pio run -t uploadfs      # Upload WebUI to LittleFS (first time only)
 
 # Or from the monorepo root:
 pio run -d client/ -t upload
-pio run -d client/ -t uploadfs
 ```
 
 Upload speed: 230400 baud. Port: auto-detected.
@@ -100,13 +98,10 @@ client/
 │   ├── main.cpp               # setup(), loop(), init orchestration
 │   ├── display.cpp/.h         # TFT drawing — header, panels, status bar
 │   ├── bus_api.cpp/.h         # NAS fetch, JSON parse, data structs
-│   ├── config.cpp             # NAS URL NVS persistence
+│   ├── config.cpp             # Stop + NAS URL NVS persistence
 │   ├── time_mgr.cpp/.h        # ezTime NTP, time/date/day helpers
 │   ├── web_server.cpp/.h      # AsyncWebServer, device config API
 │   └── debug.cpp              # Wall-clock timestamp for debug output
-└── data/
-    └── www/
-        └── index.html         # Device config SPA (LittleFS)
 ```
 
 ---
@@ -117,13 +112,11 @@ Access at the device's IP address or `http://cyd-busstop.local/`.
 
 | Method | Path               | Description                                |
 |:-------|:-------------------|:-------------------------------------------|
-| GET    | `/`                | Device config SPA                          |
-| GET    | `/api/device`      | Device status (IP, NAS URL, errors, heap)  |
-| GET    | `/api/state`       | Cached bus data                            |
-| GET    | `/api/refresh`     | Trigger immediate server fetch             |
-| POST   | `/api/nas-url`     | Update server URL                          |
-| POST   | `/api/brightness`  | Set display brightness                     |
-| POST   | `/api/reboot`      | Restart device                             |
+| GET    | `/`                | Live local dashboard + stop editor         |
+| GET    | `/api/state`       | Cached NAS data with current countdowns    |
+| GET    | `/api/stops`       | Current stop configuration                 |
+| POST   | `/api/stops`       | Replace stop ids/names and queue refresh   |
+| POST   | `/api/stops/reset` | Restore default stop ids/names             |
 
 ---
 
@@ -135,7 +128,9 @@ Landscape 320x240. Header bar with time and date, then 2x2 grid of stop panels.
 Each panel shows the stop name and up to 3 departure rows with route number,
 real-time indicator, countdown, and clock time.
 
-Footer shows `upd HH:MM` — the time of the last successful NAS fetch.
+Footer shows `upd HH:MM` for the last successful NAS fetch. If the NAS becomes
+unreachable, the footer prepends `SERVER OFFLINE` in red while the client keeps
+aging the cached countdowns locally.
 
 ---
 

@@ -10,6 +10,8 @@ char stopNames[STOP_COUNT][STOP_NAME_MAX];
 static const char* PREF_NAMESPACE = "busstop";
 static const char* PREF_COUNT_KEY = "count";
 static const char* PREF_SIG_KEY   = "defsSig";
+static const char* NAS_NAMESPACE  = "busstop2";
+static const char* NAS_URL_KEY    = "nasUrl";
 
 static uint32_t hashBytes(uint32_t hash, const char* s) {
   while (s && *s) {
@@ -36,12 +38,14 @@ static uint32_t compiledDefaultsSignature() {
   return hash;
 }
 
-static String stopIdKey(uint8_t idx) {
-  return String("id") + idx;
+static const char* stopIdKey(uint8_t idx, char* buf, size_t len) {
+  snprintf(buf, len, "id%u", idx);
+  return buf;
 }
 
-static String stopNameKey(uint8_t idx) {
-  return String("name") + idx;
+static const char* stopNameKey(uint8_t idx, char* buf, size_t len) {
+  snprintf(buf, len, "name%u", idx);
+  return buf;
 }
 
 void initStopConfig() {
@@ -93,8 +97,9 @@ bool saveStopConfig() {
   prefs.putUInt(PREF_SIG_KEY, compiledDefaultsSignature());
 
   for (uint8_t i = 0; i < STOP_COUNT; i++) {
-    prefs.putString(stopIdKey(i).c_str(), stopIds[i]);
-    prefs.putString(stopNameKey(i).c_str(), stopNames[i]);
+    char kId[8], kName[8];
+    prefs.putString(stopIdKey(i, kId, sizeof(kId)), stopIds[i]);
+    prefs.putString(stopNameKey(i, kName, sizeof(kName)), stopNames[i]);
   }
 
   prefs.end();
@@ -124,8 +129,9 @@ bool loadStopConfig() {
   }
 
   for (uint8_t i = 0; i < STOP_COUNT; i++) {
-    String id = prefs.getString(stopIdKey(i).c_str(), "");
-    String name = prefs.getString(stopNameKey(i).c_str(), "");
+    char kId[8], kName[8];
+    String id = prefs.getString(stopIdKey(i, kId, sizeof(kId)), "");
+    String name = prefs.getString(stopNameKey(i, kName, sizeof(kName)), "");
     if (id.length() == 0 || name.length() == 0) {
       prefs.end();
       return false;
@@ -138,5 +144,42 @@ bool loadStopConfig() {
   }
 
   prefs.end();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// NAS URL config
+// ---------------------------------------------------------------------------
+
+String getNasUrl() {
+  Preferences prefs;
+  if (!prefs.begin(NAS_NAMESPACE, true)) {
+    // A read-only open fails on first boot if the namespace does not exist yet.
+    if (!prefs.begin(NAS_NAMESPACE, false)) {
+      DBG_WARN("NAS config: prefs.begin failed, using default");
+      return NAS_DEFAULT_URL;
+    }
+
+    prefs.putString(NAS_URL_KEY, NAS_DEFAULT_URL);
+    prefs.end();
+    DBG_INFO("NAS config: initialised default URL in NVS");
+    return NAS_DEFAULT_URL;
+  }
+
+  String url = prefs.getString(NAS_URL_KEY, NAS_DEFAULT_URL);
+  prefs.end();
+  return url;
+}
+
+bool setNasUrl(const String& url) {
+  Preferences prefs;
+  if (!prefs.begin(NAS_NAMESPACE, false)) {
+    DBG_ERROR("NAS config: prefs.begin failed");
+    return false;
+  }
+
+  prefs.putString(NAS_URL_KEY, url);
+  prefs.end();
+  DBG_INFO("NAS URL saved: %s", url.c_str());
   return true;
 }

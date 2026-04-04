@@ -25,12 +25,12 @@ Open:
 
 ## Authentication
 
-Authentication is now controlled by `AUTH_ENABLED` in `.env`.
+Authentication is controlled by `AUTH_ENABLED` in `app/.env`.
 
 Recommended values:
 
-- local bring-up: `AUTH_ENABLED=false`
-- before any external exposure: `AUTH_ENABLED=true`
+- default/local bring-up: `AUTH_ENABLED=false`
+- only enable it if you actually want dashboard login protection: `AUTH_ENABLED=true`
 
 Relevant variables:
 
@@ -50,14 +50,14 @@ Do not expose this app to the internet unless:
 
 ## Environment setup
 
-1. Copy `.env.example` to `.env`
+1. Copy `.env.example` to `app/.env`
 2. Set your TfNSW API key and login credentials
 
 Required variables:
 
 ```env
 TFNSW_API_KEY=your-api-key
-AUTH_ENABLED=true
+AUTH_ENABLED=false
 APP_USERNAME=admin
 APP_PASSWORD=your-password
 SESSION_SECRET=a-long-random-string
@@ -68,11 +68,11 @@ PORT=8081
 
 ## Source Of Truth
 
-For Synology deployments, the live configuration is the `.env` file in the NAS project folder selected in Container Manager, not necessarily the file currently open in VS Code on another machine.
+For Synology deployments, the live configuration is `app/.env` in the NAS project folder selected in Container Manager, not necessarily the file currently open in VS Code on another machine.
 
 This project now shows masked runtime values on the dashboard so you can verify what the running container is actually using.
 
-If the dashboard values do not match your editor, update the NAS project folder copy and recreate or restart the project.
+If the dashboard values do not match your editor, update the NAS project folder `app/.env` copy and recreate the project.
 
 ## Run with Docker Compose
 
@@ -115,10 +115,16 @@ relative bind mount. This avoids the common Synology Container Manager error:
 When copying to the NAS, include these files in the project folder:
 
 - `docker-compose.yml`
-- `.env` (created from `.env.example`)
+- `app/.env` (created from `.env.example`)
 - `Dockerfile`
 - `requirements.txt`
 - `app/`
+
+Deployment rule:
+
+- Keep one runtime env file only: `app/.env`
+- Do not rely on a second root `.env` for Synology Container Manager
+- The compose file now loads `./app/.env` explicitly and publishes container port `8081` directly
 
 ## API endpoints
 

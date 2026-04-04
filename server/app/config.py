@@ -21,7 +21,8 @@ class Settings:
     timezone: str = os.getenv("TIMEZONE", "Australia/Sydney")
     poll_interval_seconds: int = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
     port: int = int(os.getenv("PORT", "8081"))
-    auth_enabled: bool = os.getenv("AUTH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    auth_enabled: bool = os.getenv("AUTH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    nas_api_key: str = os.getenv("NAS_API_KEY", "")
     database_url: str = os.getenv("DATABASE_URL", "sqlite:////app/data/busstop.db")
 
 

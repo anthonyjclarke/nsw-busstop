@@ -10,6 +10,58 @@ Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
 
 ---
 
+## [0.5.1] 2026-04-04
+
+### Added
+- Offline footer indicator on the TFT: when the NAS fetch fails, the bottom
+  status line now shows `SERVER OFFLINE` before `upd HH:MM` while cached
+  departure data continues to age locally.
+
+### Changed
+- `fetchAllStops()` now returns success/failure so the main loop can keep the
+  last successful fetch time unchanged on server errors instead of showing a
+  misleading fresh timestamp.
+
+### Fixed
+- NAS URL config first-boot behaviour: `getNasUrl()` now creates and seeds the
+  `busstop2` NVS namespace with `NAS_DEFAULT_URL` when it does not yet exist,
+  removing the spurious `prefs.begin(readonly) failed` warning.
+
+---
+
+## [0.5.0] 2026-04-04
+
+### Changed
+- **NAS thin-client rewrite:** `fetchAllStops()` now makes a single
+  `GET /api/state` call to the NAS server instead of 4 direct TfNSW API calls.
+  Removes all TfNSW API constants, `DeChunkStream` chunked-transfer wrapper,
+  `parseISODatetime` helper, and `WiFiClientSecure` dependency from the client.
+- Replaced all `DynamicJsonDocument` with `StaticJsonDocument` throughout
+  `bus_api.cpp` and `web_server.cpp` — eliminates heap fragmentation from
+  repeated alloc/free on every poll and browser request.
+- NVS key helpers `stopIdKey()` / `stopNameKey()` in `config.cpp` now use
+  stack `char` buffers via `snprintf` instead of heap-allocated `String`.
+- Log line in `fetchAllStops()` uses stack `char` buffer instead of double
+  `String` construction.
+
+### Added
+- Hour formatting for departures >=60 minutes: displays `{h}h{mm}m` (e.g.
+  "1h05m") instead of raw minute count.
+- `lastFetchMs` is now set on each successful NAS fetch — `fetchAge` in
+  `/api/state` WebUI response now reports real values instead of `-1`.
+
+### Fixed
+- Vertical divider overdraw: `drawFastVLine` length was `240` (drew 28px past
+  screen bottom); corrected to `240 - HEADER_H` (212px).
+- Removed `fetchStop()` declaration from `bus_api.h` — function was deleted but
+  declaration remained, causing potential linker issues.
+- Removed unused `epochPlanned` field from `Departure` struct — was declared
+  but never assigned or read.
+- Fixed stale comments in `web_server.h` (referenced ArduinoOTA handling that
+  was moved to `main.cpp`).
+
+---
+
 ## [0.4.0] 2026-04-04
 
 ### Changed
@@ -32,32 +84,13 @@ Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
 - Add secure admin access to web config endpoints (password / token) to prevent
   unauthorized changes.
 - Add optional zone and stop name autocomplete using TfNSW lookup endpoint.
-- Add a persistent JSON file fallback (LittleFS) in addition to NVS for config
-  portability and ease of manual editing.
 - Add a dedicated `/config` page in WebUI for full device settings (poll
   interval, display brightness, timezone, etc.)
 - Add full config page in WebUI, including system diagnostics.
-
-### Code optimisations
-
-- Replace `delay(1)` with `yield()` in `DeChunkStream::_timedRead()` — keeps
-  the WiFi/lwIP stack alive during byte-by-byte stream reads; `delay(1)`
-  blocks FreeRTOS for a full tick on every byte of a ~60KB response.
-- Replace `DynamicJsonDocument(8192)` in `fetchStop()` with
-  `StaticJsonDocument<4096>` — the ArduinoJson filter limits the parsed tree;
-  heap-allocating and freeing 8KB four times per poll cycle causes fragmentation.
-- Fix vertical divider overdraw in `drawDividers()`: `drawFastVLine(PANEL_W,
-  HEADER_H, 240, ...)` draws 28px past the bottom of the 240px screen —
-  length should be `240 - HEADER_H` (212).
-- Replace `DynamicJsonDocument` in `handleApiState()` and `handleApiStops()`
-  with `StaticJsonDocument` equivalents — both are called on every browser poll.
-- Replace heap-allocated `String` returns from `stopIdKey()` / `stopNameKey()`
-  in `config.cpp` with stack `char` buffers via `snprintf`.
-- Fix double-`String` construction in `bus_api.cpp` fetch log line:
-  `String(String(contentLen) + " bytes")` allocates two objects; use `%d`
-  format directly.
-- Move `fetchAllStops()` to a FreeRTOS task (Phase 3) — currently blocks the
-  main loop for ~10s, leaving OTA and web requests unresponsive.
+- Persist brightness setting across reboots via NVS.
+- Add staleness indicator when NAS has been unreachable for > N seconds.
+- Move `fetchAllStops()` to a FreeRTOS task — currently blocks the main loop
+  for ~50-200ms (LAN HTTP), leaving OTA and web requests unresponsive.
 
 ---
 
