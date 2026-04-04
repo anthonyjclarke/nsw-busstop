@@ -17,6 +17,15 @@ class StopInput(SQLModel):
     name: str
 
 
+class DashboardConfig(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    departures_per_stop: int = Field(default=3, ge=1, le=8)
+
+
+class DashboardConfigInput(SQLModel):
+    departures_per_stop: int = Field(ge=1, le=8)
+
+
 class Departure(SQLModel):
     route: str = ""
     clock: str = ""

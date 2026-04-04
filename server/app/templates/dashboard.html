@@ -192,13 +192,30 @@
       gap: 10px;
       margin-bottom: 10px;
     }
-    input {
+    input[type="text"] {
       width: 100%;
       padding: 10px 12px;
       border-radius: 10px;
       border: 1px solid var(--border);
       background: var(--panel-2);
       color: var(--text);
+    }
+    .slider-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin: 14px 0 10px;
+      flex-wrap: wrap;
+    }
+    .slider-value {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #ff8a00;
+      margin-bottom: 12px;
     }
     .status { color: var(--muted); margin-top: 10px; }
     @media (max-width: 720px) {
@@ -255,6 +272,27 @@
       </div>
 
       <div class="card config">
+        <h2>Dashboard Display</h2>
+        <p class="meta">Server WebUI rows per stop. ESP32 remains fixed at 3 departures.</p>
+        <div class="slider-row">
+          <label for="departuresPerStop">Rows per stop</label>
+          <div class="slider-value"><span id="departuresPerStopValue">{{ dashboard_departures_per_stop }}</span> buses</div>
+        </div>
+        <input
+          id="departuresPerStop"
+          type="range"
+          min="1"
+          max="8"
+          value="{{ dashboard_departures_per_stop }}"
+          oninput="updateDashboardConfigPreview()"
+        >
+        <div class="actions">
+          <button class="primary" onclick="saveDashboardConfig()">Save display setting</button>
+        </div>
+        <div id="dashboardConfigStatus" class="status"></div>
+      </div>
+
+      <div class="card config">
         <h2>Server Status</h2>
         <div class="config-grid">
           <div class="config-item">
@@ -264,6 +302,10 @@
           <div class="config-item">
             <div class="config-label">Configured Stops</div>
             <div class="config-value">{{ server_status.stopCount }}</div>
+          </div>
+          <div class="config-item">
+            <div class="config-label">Dashboard Rows Per Stop</div>
+            <div id="dashboardRowsStatus" class="config-value">{{ server_status.dashboardDeparturesPerStop }}</div>
           </div>
           <div class="config-item">
             <div class="config-label">Last Poll</div>
@@ -292,6 +334,7 @@
 
   <script>
     let state = {{ payload | tojson }};
+    let dashboardDeparturesPerStop = {{ dashboard_departures_per_stop }};
     let currentTab = "departures";
 
     function delayHtml(seconds) {
@@ -401,7 +444,34 @@
         panel.classList.toggle("active", panel.id === `tab-${tabName}`);
       });
       if (tabName === "settings") {
+        syncDashboardConfigControls();
         loadStops();
+      }
+    }
+
+    function syncDashboardConfigControls() {
+      const slider = document.getElementById("departuresPerStop");
+      const valueLabel = document.getElementById("departuresPerStopValue");
+      const statusValue = document.getElementById("dashboardRowsStatus");
+      slider.value = dashboardDeparturesPerStop;
+      valueLabel.textContent = dashboardDeparturesPerStop;
+      statusValue.textContent = dashboardDeparturesPerStop;
+    }
+
+    function updateDashboardConfigPreview() {
+      const slider = document.getElementById("departuresPerStop");
+      document.getElementById("departuresPerStopValue").textContent = slider.value;
+    }
+
+    function flashStatus(id, message, clearAfterMs) {
+      const el = document.getElementById(id);
+      el.textContent = message;
+      if (clearAfterMs > 0) {
+        window.setTimeout(() => {
+          if (el.textContent === message) {
+            el.textContent = "";
+          }
+        }, clearAfterMs);
       }
     }
 
@@ -456,18 +526,45 @@
         return;
       }
 
-      document.getElementById("saveStatus").textContent = "Saved";
+      flashStatus("saveStatus", "Saved", 2500);
       await loadState();
       await loadStops();
     }
 
+    async function saveDashboardConfig() {
+      const slider = document.getElementById("departuresPerStop");
+      const departuresPerStop = Number(slider.value);
+
+      const response = await fetch("/api/dashboard-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ departures_per_stop: departuresPerStop })
+      });
+
+      if (!response.ok) {
+        document.getElementById("dashboardConfigStatus").textContent = "Save failed";
+        return;
+      }
+
+      const payload = await response.json();
+      dashboardDeparturesPerStop = payload.departuresPerStop;
+      syncDashboardConfigControls();
+      flashStatus("dashboardConfigStatus", "Saved", 2500);
+      await loadState();
+    }
+
     async function loadState() {
-      const response = await fetch("/api/state");
+      const response = await fetch("/api/dashboard-state");
       state = await response.json();
+      if (typeof state.dashboardDeparturesPerStop === "number") {
+        dashboardDeparturesPerStop = state.dashboardDeparturesPerStop;
+      }
+      syncDashboardConfigControls();
       renderStops();
     }
 
     renderStops();
+    syncDashboardConfigControls();
     setInterval(loadState, {{ poll_interval_seconds * 1000 }});
   </script>
 </body>

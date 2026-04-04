@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.config import DEFAULT_STOPS, settings
-from app.models import StopConfig
+from app.config import DEFAULT_DASHBOARD_DEPARTURES_PER_STOP, DEFAULT_STOPS, settings
+from app.models import DashboardConfig, StopConfig
 
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
@@ -14,6 +14,16 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
+        dashboard_config = session.get(DashboardConfig, 1)
+        if dashboard_config is None:
+            session.add(
+                DashboardConfig(
+                    id=1,
+                    departures_per_stop=DEFAULT_DASHBOARD_DEPARTURES_PER_STOP,
+                )
+            )
+            session.commit()
+
         stop_count = len(list(session.exec(select(StopConfig))))
         if stop_count == 0:
             for sort_order, (stop_id, name) in enumerate(DEFAULT_STOPS):

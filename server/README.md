@@ -3,7 +3,9 @@
 Python/FastAPI server that polls the TfNSW Trip Planner API for bus departures
 and serves a live dashboard + JSON feed. This is the **server** component of
 the [nsw-busstop](../README.md) monorepo. The companion ESP32 client
-([../client/](../client/)) consumes `/api/state` from this server.
+([../client/](../client/)) consumes `/api/state` from this server. The server
+dashboard supports a persisted 1 to 8 departures-per-stop setting, while the
+ESP32 feed remains fixed at 3 departures per stop.
 
 For the project overview, architecture diagram, screenshots, full Synology
 deployment guide, and cross-component JSON contract, see the
@@ -49,6 +51,9 @@ For Synology deployments, `app/.env` in the NAS project folder is the source of
 truth. The **Settings** tab of the dashboard shows live runtime status
 (container uptime, last poll, last error, configured stop count) so you can
 confirm what the running container is actually using.
+The dashboard's rows-per-stop display setting is persisted in SQLite and can be
+set from 1 to 8 without changing the ESP32 feed, which remains fixed at 3
+departures per stop.
 
 ---
 
@@ -116,6 +121,7 @@ server/
 │   ├── models.py             # SQLModel table + Pydantic schemas
 │   ├── services/
 │   │   ├── auth.py           # Session + Bearer token auth
+│   │   ├── server_config.py  # Persisted dashboard display settings
 │   │   ├── stops.py          # Stop CRUD operations
 │   │   └── tfnsw.py          # TfNSW API polling + departure parsing
 │   ├── static/
@@ -137,7 +143,10 @@ server/
 | GET    | `/login`     | No     | Login page                       |
 | POST   | `/login`     | No     | Form login                       |
 | POST   | `/logout`    | No     | Clear session                    |
-| GET    | `/api/state` | Yes\*  | Full state JSON (for ESP32)      |
+| GET    | `/api/state` | Yes\*  | Fixed 3-departure state JSON for ESP32 |
+| GET    | `/api/dashboard-state` | Yes\* | Dashboard JSON using the saved 1 to 8 row limit |
+| GET    | `/api/dashboard-config` | Yes\* | Current dashboard rows-per-stop setting |
+| POST   | `/api/dashboard-config` | Yes\* | Update dashboard rows-per-stop setting |
 | GET    | `/api/stops` | Yes\*  | Stop list JSON                   |
 | POST   | `/api/stops` | Yes\*  | Replace all stops, trigger fetch |
 
@@ -147,13 +156,18 @@ server/
 For the full JSON schema of `/api/state`, see the
 [cross-component contract](../README.md#cross-component-json-contract).
 
+The configurable departures-per-stop setting applies to the dashboard HTML and
+`/api/dashboard-state`. It does not change the ESP32-facing `/api/state`
+payload.
+
 ---
 
 ## Database
 
-Single table `stopconfig` (id, stop_id, name, sort_order). Seeded on first run
-with four default Ryde/Putney stops. Stops are managed via the dashboard
-**Settings** tab or `POST /api/stops`.
+SQLite stores both the stop list and the dashboard display setting.
+`stopconfig` is seeded on first run with four default Ryde/Putney stops, and
+the dashboard rows-per-stop setting defaults to 3. Stops are managed via the
+dashboard **Settings** tab or `POST /api/stops`.
 
 Persistence is via a Docker named volume (`nsw-busstop-data`) mounted at
 `/app/data`. See the
