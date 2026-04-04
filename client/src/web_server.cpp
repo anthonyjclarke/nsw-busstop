@@ -3,21 +3,16 @@
 #include "time_mgr.h"
 #include "../include/config.h"
 #include "../include/debug.h"
+#include "../include/secrets.h"
 
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <WiFi.h>
 
 static AsyncWebServer server(WEB_PORT);
 
-// ---------------------------------------------------------------------------
-// Route handlers
-// ---------------------------------------------------------------------------
-
-// GET /api/state
-// Returns current time, date, and all stop departure data as JSON.
-// Consumed by the device dashboard at `/` and any external viewers.
-static void handleApiState(AsyncWebServerRequest* req) {
+static void buildLocalStateJson(String& body) {
   // Recalculate minutes so the JSON always reflects current time
   recalcMinutes();
 
@@ -56,13 +51,144 @@ static void handleApiState(AsyncWebServerRequest* req) {
     }
   }
 
-  String body;
   serializeJson(doc, body);
+}
+
+static bool fetchNasJson(const char* path, String& body) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  String url = getNasUrl();
+  if (url.endsWith("/") && path[0] == '/') {
+    url.remove(url.length() - 1);
+  } else if (!url.endsWith("/") && path[0] != '/') {
+    url += '/';
+  }
+  url += path;
+
+  WiFiClient client;
+  HTTPClient http;
+  http.begin(client, url);
+  http.setTimeout(5000);
+
+  if (strlen(SECRET_NAS_API_KEY) > 0) {
+    http.addHeader("Authorization", String("Bearer ") + SECRET_NAS_API_KEY);
+  }
+
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    DBG_WARN("NAS proxy GET failed: %s -> HTTP %d", url.c_str(), code);
+    http.end();
+    return false;
+  }
+
+  body = http.getString();
+  http.end();
+  return true;
+}
+
+static bool postNasJson(const char* path, const String& payload, String& body) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  String url = getNasUrl();
+  if (url.endsWith("/") && path[0] == '/') {
+    url.remove(url.length() - 1);
+  } else if (!url.endsWith("/") && path[0] != '/') {
+    url += '/';
+  }
+  url += path;
+
+  WiFiClient client;
+  HTTPClient http;
+  http.begin(client, url);
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/json");
+
+  if (strlen(SECRET_NAS_API_KEY) > 0) {
+    http.addHeader("Authorization", String("Bearer ") + SECRET_NAS_API_KEY);
+  }
+
+  int code = http.POST(payload);
+  if (code != HTTP_CODE_OK) {
+    DBG_WARN("NAS proxy POST failed: %s -> HTTP %d", url.c_str(), code);
+    http.end();
+    return false;
+  }
+
+  body = http.getString();
+  http.end();
+  return true;
+}
+
+static bool getNasDashboardRows(uint8_t& rowsOut) {
+  String body;
+  if (!fetchNasJson("/api/dashboard-config", body)) {
+    return false;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    DBG_WARN("NAS dashboard-config parse error: %s", err.c_str());
+    return false;
+  }
+
+  int rows = doc["departuresPerStop"] | 0;
+  if (rows < WEBUI_DEPARTURES_MIN || rows > WEBUI_DEPARTURES_MAX) {
+    DBG_WARN("NAS dashboard rows out of range: %d", rows);
+    return false;
+  }
+
+  rowsOut = (uint8_t)rows;
+  return true;
+}
+
+static bool setNasDashboardRows(uint8_t rows) {
+  if (rows < WEBUI_DEPARTURES_MIN || rows > WEBUI_DEPARTURES_MAX) {
+    return false;
+  }
+
+  StaticJsonDocument<64> doc;
+  doc["departures_per_stop"] = rows;
+
+  String payload;
+  serializeJson(doc, payload);
+
+  String body;
+  return postNasJson("/api/dashboard-config", payload, body);
+}
+
+// ---------------------------------------------------------------------------
+// Route handlers
+// ---------------------------------------------------------------------------
+
+// GET /api/state
+// Returns the fixed local cache used by the TFT.
+static void handleApiState(AsyncWebServerRequest* req) {
+  String body;
+  buildLocalStateJson(body);
+  req->send(200, "application/json", body);
+}
+
+// GET /api/dashboard-state
+// For the browser dashboard, prefer the NAS dashboard-state feed so the local
+// WebUI can show 1-8 rows per stop while the TFT remains fixed at 3.
+static void handleApiDashboardState(AsyncWebServerRequest* req) {
+  String body;
+  if (fetchNasJson("/api/dashboard-state", body)) {
+    req->send(200, "application/json", body);
+    return;
+  }
+
+  buildLocalStateJson(body);
   req->send(200, "application/json", body);
 }
 
 // GET /
-// Dashboard — polls /api/state every 15s, re-renders every 5s client-side.
+// Dashboard — polls /api/dashboard-state every 15s, re-renders every 5s client-side.
 static const char ROOT_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -104,7 +230,7 @@ h1{font-size:1.2em;margin-bottom:.15em}
 <script>
 var D=null,fetched=0;
 function fetchAndRender(){
-  fetch('/api/state').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/dashboard-state').then(function(r){return r.json();}).then(function(d){
     D=d;fetched=Date.now();render();
   }).catch(function(){
   });
@@ -203,8 +329,12 @@ h2{font-size:.95em;margin:.8em 0 .4em;color:#0cf}
 .row{display:flex;justify-content:space-between;padding:.2em 0;font-size:.85em;gap:.5em}
 .row span:first-child{color:#888}
 .row span:last-child{color:#fff;font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-all}
+.meta{color:#888;font-size:.8em;line-height:1.45;margin-bottom:.6em}
+.slider-row{display:flex;justify-content:space-between;align-items:center;gap:.5em;flex-wrap:wrap;margin-bottom:.35em}
+.slider-value{color:#0cf;font-weight:700}
 label{display:block;color:#888;font-size:.8em;margin-bottom:.25em}
-input{width:100%;padding:.5em;border-radius:4px;border:1px solid #333;background:#222;color:#fff;font-family:ui-monospace,Menlo,monospace;font-size:.85em}
+input[type="text"]{width:100%;padding:.5em;border-radius:4px;border:1px solid #333;background:#222;color:#fff;font-family:ui-monospace,Menlo,monospace;font-size:.85em}
+input[type="range"]{width:100%;accent-color:#0cf}
 button{padding:.5em 1em;border-radius:4px;border:0;background:#0cf;color:#000;font-weight:600;cursor:pointer;margin-top:.5em}
 button:hover{background:#0af}
 .status{font-size:.75em;margin-top:.4em;min-height:1em}
@@ -223,16 +353,40 @@ button:hover{background:#0af}
 </div>
 
 <div class="card">
+<h2>WebUI Display</h2>
+<div class="meta">Server-backed rows per stop for the NAS dashboard and this device browser view. The TFT stays fixed at 3 departures.</div>
+<div class="slider-row">
+<label for="webUiRows">Rows per stop</label>
+<div class="slider-value"><span id="webUiRowsValue">3</span> buses</div>
+</div>
+<input id="webUiRows" type="range" min="1" max="8" value="3" oninput="updateWebUiRowsPreview()">
+<button onclick="saveWebUiRows()">Save display setting</button>
+<div id="webUiStatus" class="status"></div>
+</div>
+
+<div class="card">
 <h2>System Stats</h2>
 <div id="stats">Loading...</div>
 </div>
 
-<div class="ft"><a href="/">Departures</a><a href="/api/state">JSON</a></div>
+<div class="ft"><a href="/">Departures</a><a href="/api/dashboard-state">WebUI JSON</a><a href="/api/state">TFT JSON</a></div>
 
 <script>
+function flashStatus(id,msg,ok,clearMs){
+  var s=document.getElementById(id);
+  s.textContent=msg;s.className='status '+(ok?'ok':'err');
+  if(clearMs){
+    window.setTimeout(function(){if(s.textContent===msg){s.textContent='';s.className='status';}},clearMs);
+  }
+}
+function updateWebUiRowsPreview(){
+  document.getElementById('webUiRowsValue').textContent=document.getElementById('webUiRows').value;
+}
 function load(){
   fetch('/api/config').then(function(r){return r.json();}).then(function(d){
     document.getElementById('nasUrl').value=d.nasUrl||'';
+    document.getElementById('webUiRows').value=d.webUiRows||3;
+    updateWebUiRowsPreview();
     var rows=[
       ['Uptime',d.uptime],
       ['Firmware',d.build],
@@ -257,9 +411,27 @@ function saveNas(){
   s.textContent='Saving...';s.className='status';
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nasUrl:url})})
     .then(function(r){
-      if(r.ok){s.textContent='Saved. Reboot to apply.';s.className='status ok';}
+      if(r.ok){
+        var msg='Saved. Reboot to apply.';
+        s.textContent=msg;s.className='status ok';
+        window.setTimeout(function(){if(s.textContent===msg){s.textContent='';s.className='status';}},2500);
+      }
       else{s.textContent='Save failed';s.className='status err';}
     }).catch(function(){s.textContent='Save failed';s.className='status err';});
+}
+function saveWebUiRows(){
+  var rows=Number(document.getElementById('webUiRows').value);
+  document.getElementById('webUiStatus').textContent='Saving...';
+  document.getElementById('webUiStatus').className='status';
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({webUiRows:rows})})
+    .then(function(r){
+      if(!r.ok)throw new Error('save failed');
+      return r.json();
+    })
+    .then(function(d){
+      if(d.webUiRows){document.getElementById('webUiRows').value=d.webUiRows;updateWebUiRowsPreview();}
+      flashStatus('webUiStatus','Saved. TFT remains fixed at 3.',true,2500);
+    }).catch(function(){flashStatus('webUiStatus','Save failed',false,0);});
 }
 load();
 setInterval(load,10000);
@@ -317,13 +489,19 @@ static void handleApiConfigGet(AsyncWebServerRequest* req) {
   }
 
   doc["nasUrl"] = getNasUrl();
+  uint8_t webUiRows = DEPARTURES_PER_STOP;
+  if (getNasDashboardRows(webUiRows)) {
+    doc["webUiRows"] = webUiRows;
+  } else {
+    doc["webUiRows"] = DEPARTURES_PER_STOP;
+  }
 
   String body;
   serializeJson(doc, body);
   req->send(200, "application/json", body);
 }
 
-// POST /api/config — update NAS URL (JSON body: {"nasUrl":"..."})
+// POST /api/config — update NAS URL and/or NAS-backed WebUI rows
 static void handleApiConfigPost(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
   if (index != 0 || len != total) {
     req->send(400, "application/json", "{\"error\":\"chunked body not supported\"}");
@@ -337,18 +515,52 @@ static void handleApiConfigPost(AsyncWebServerRequest* req, uint8_t* data, size_
     return;
   }
 
-  const char* url = doc["nasUrl"];
-  if (!url || strlen(url) < 8) {
-    req->send(400, "application/json", "{\"error\":\"nasUrl required\"}");
+  bool hasNasUrl = doc.containsKey("nasUrl");
+  bool hasWebUiRows = doc.containsKey("webUiRows");
+  if (!hasNasUrl && !hasWebUiRows) {
+    req->send(400, "application/json", "{\"error\":\"no config fields supplied\"}");
     return;
   }
 
-  if (!setNasUrl(String(url))) {
-    req->send(500, "application/json", "{\"error\":\"save failed\"}");
-    return;
+  if (hasNasUrl) {
+    const char* url = doc["nasUrl"];
+    if (!url || strlen(url) < 8) {
+      req->send(400, "application/json", "{\"error\":\"nasUrl required\"}");
+      return;
+    }
+
+    if (!setNasUrl(String(url))) {
+      req->send(500, "application/json", "{\"error\":\"save failed\"}");
+      return;
+    }
   }
 
-  req->send(200, "application/json", "{\"ok\":true}");
+  int webUiRows = 0;
+  if (hasWebUiRows) {
+    webUiRows = doc["webUiRows"] | 0;
+    if (webUiRows < WEBUI_DEPARTURES_MIN || webUiRows > WEBUI_DEPARTURES_MAX) {
+      req->send(400, "application/json", "{\"error\":\"webUiRows out of range\"}");
+      return;
+    }
+
+    if (!setNasDashboardRows((uint8_t)webUiRows)) {
+      req->send(502, "application/json", "{\"error\":\"nas display save failed\"}");
+      return;
+    }
+  }
+
+  StaticJsonDocument<128> resp;
+  resp["ok"] = true;
+  if (hasNasUrl) {
+    resp["nasUrl"] = getNasUrl();
+  }
+  if (hasWebUiRows) {
+    resp["webUiRows"] = webUiRows;
+  }
+
+  String body;
+  serializeJson(resp, body);
+  req->send(200, "application/json", body);
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +571,7 @@ void initWebServer() {
   server.on("/",           HTTP_GET, handleRoot);
   server.on("/config",     HTTP_GET, handleConfigPage);
   server.on("/api/state",  HTTP_GET, handleApiState);
+  server.on("/api/dashboard-state", HTTP_GET, handleApiDashboardState);
   server.on("/api/config", HTTP_GET, handleApiConfigGet);
   server.on("/api/config", HTTP_POST,
             [](AsyncWebServerRequest* req) {},

@@ -16,14 +16,25 @@ Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
 - `/config` device page: editable NAS server URL (saved to NVS) and live
   system stats (uptime, firmware build, WiFi SSID/IP/RSSI/MAC, hostname, free
   heap, max alloc block, last-fetch age, chip info). Auto-refreshes every 10s.
+- `/config` device page: WebUI rows-per-stop slider (1-8) for the NAS-backed
+  browser dashboard feed, with explicit note that the TFT stays fixed at 3.
 - `GET /api/config` — returns system stats + current NAS URL as JSON.
-- `POST /api/config` — updates the NAS URL (validated, persisted to NVS).
+- `GET /api/config` now also returns the current NAS dashboard rows-per-stop
+  value for the local slider.
+- `GET /api/dashboard-state` — browser-focused JSON feed that proxies the NAS
+  dashboard-state payload when available, so the device WebUI can show 1-8
+  rows without changing the TFT cache.
+- `POST /api/config` — updates the NAS URL (validated, persisted to NVS)
+  and/or the NAS-backed WebUI rows-per-stop setting.
 - Hour formatting on WebUI: departures >=60 min now render as `1h5m` / `2h` to
   match the TFT and server dashboard formats.
 
 ### Changed
 - WebUI dashboard footer now links to `/config` instead of directly to raw JSON
   (JSON link moved to the config page footer).
+- ESP32 browser dashboard now polls `/api/dashboard-state` instead of the
+  fixed local `/api/state`, so the device-served WebUI can show 1-8 rows per
+  stop while the TFT and cached client poll stay fixed at 3.
 - Server status dot on TFT now sits to the right of the "Server Status" label
   instead of overlapping the middle of the text.
 - Shrank `/api/state` JSON buffer from `StaticJsonDocument<3072>` to `<2048>`;

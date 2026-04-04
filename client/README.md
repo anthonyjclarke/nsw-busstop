@@ -2,8 +2,10 @@
 
 ESP32 bus departure display for the **ESP32-2432S028R (CYD 2.8")**. This is the
 **client** component of the [nsw-busstop](../README.md) monorepo: it fetches
-pre-processed bus data from the companion [server](../server/), mirrors that
-state locally, and renders it on the TFT.
+pre-processed bus data from the companion [server](../server/), caches the
+fixed 3-row feed for the TFT, and serves a local browser dashboard. The device
+web UI can use the NAS-backed 1 to 8 rows-per-stop setting from `/config`,
+while the TFT intentionally stays fixed at 3 departures per stop.
 
 **The server must be running on your local network for this device to show bus data.**
 
@@ -77,6 +79,10 @@ pio run -t upload --upload-port cyd-busstop.local
 The NAS URL can also be changed at runtime from the device `/config` page — it
 is persisted to NVS and takes effect on reboot.
 
+The TFT on this client is not configurable from the device and remains fixed
+at 3 departures per stop. The local browser dashboard can use the NAS-backed
+1 to 8 rows-per-stop setting from the device `/config` page.
+
 ---
 
 ## Project Structure
@@ -114,6 +120,9 @@ aging locally between successful polls.
 
 The stop list comes from the NAS `/api/state` response order; the client no
 longer offers local stop editing — configure stops on the server dashboard.
+The TFT layout stays fixed at 3 rows per stop for compatibility and screen
+fit. The browser dashboard served by the device can proxy the NAS dashboard
+feed and show 1 to 8 rows per stop.
 
 ---
 
@@ -123,15 +132,17 @@ Access at the device's IP address or `http://cyd-busstop.local/`.
 
 | Method | Path          | Description                              |
 |:-------|:--------------|:-----------------------------------------|
-| GET    | `/`           | Live local dashboard mirror              |
+| GET    | `/`           | Live local dashboard (1-8 rows via NAS)  |
 | GET    | `/config`     | Device config + system stats page        |
-| GET    | `/api/state`  | Cached NAS data with current countdowns  |
-| GET    | `/api/config` | System stats + NAS URL as JSON           |
-| POST   | `/api/config` | Update NAS URL (reboot to apply)         |
+| GET    | `/api/state`  | Fixed local TFT/cache JSON               |
+| GET    | `/api/dashboard-state` | Browser dashboard JSON (NAS-backed when available) |
+| GET    | `/api/config` | System stats + NAS URL/WebUI rows as JSON |
+| POST   | `/api/config` | Update NAS URL and/or WebUI rows         |
 
 The `/config` page shows uptime, firmware build date, WiFi SSID/IP/RSSI/MAC,
-hostname, free heap, max alloc block, last-fetch age, and chip info, and lets
-you edit the NAS server URL at runtime.
+hostname, free heap, max alloc block, last-fetch age, and chip info. It also
+lets you edit the NAS server URL and the NAS-backed browser rows-per-stop
+setting at runtime. The TFT remains fixed at 3 rows.
 
 ---
 
