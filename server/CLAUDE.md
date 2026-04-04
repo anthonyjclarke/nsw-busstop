@@ -57,7 +57,11 @@ TfNSW Departure Monitor: `https://api.transport.nsw.gov.au/v1/tp/departure_mon`
 ## Environment Variables
 
 All set in `.env` (gitignored). See `.env.example` for the full list:
-`TFNSW_API_KEY`, `AUTH_ENABLED`, `APP_USERNAME`, `APP_PASSWORD`, `SESSION_SECRET`, `TIMEZONE`, `POLL_INTERVAL_SECONDS`, `PORT`, `DATABASE_URL`
+`TFNSW_API_KEY`, `AUTH_ENABLED`, `APP_USERNAME`, `APP_PASSWORD`, `SESSION_SECRET`, `NAS_API_KEY`, `TIMEZONE`, `POLL_INTERVAL_SECONDS`, `PORT`, `DATABASE_URL`
+
+`NAS_API_KEY` enables Bearer token auth for the ESP32 client. When set, the
+client sends `Authorization: Bearer <key>` and the server validates it via
+`hmac.compare_digest`. This is in addition to session-based dashboard auth.
 
 ## Database
 
@@ -89,6 +93,6 @@ Single table `stopconfig` (id, stop_id, name, sort_order). Seeded on first run w
 ## Known Quirks
 
 - `strftime("%-d")` is Linux-only — will break on Windows (not an issue in Docker)
-- Auth is simple plaintext comparison — no rate limiting or brute-force protection
-- Background poller fetches stops sequentially, not in parallel
+- Auth uses `hmac.compare_digest` for timing-safe comparison but has no rate limiting
+- Background poller fetches all stops in parallel via `asyncio.gather`
 - The `spiffs` partition subtype in SQLite path naming is unrelated to ESP32 SPIFFS — it's just SQLite on ext4 inside the container

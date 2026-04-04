@@ -39,23 +39,9 @@ bool loadStopConfig();
 bool resetStopConfig();
 
 // ---------------------------------------------------------------------------
-// TfNSW API
+// Refresh
 // ---------------------------------------------------------------------------
-constexpr const char* TFNSW_API_HOST = "api.transport.nsw.gov.au";
-constexpr const char* TFNSW_API_BASE =
-  "https://api.transport.nsw.gov.au/v1/tp/departure_mon"
-  "?outputFormat=rapidJSON"
-  "&coordOutputFormat=EPSG:4326"
-  "&mode=direct"
-  "&type_dm=stop"
-  "&departureMonitorMacro=true"
-  "&TfNSWDM=true"
-  "&version=10.2.1.42"
-  "&depArr=dep"
-  "&limit=6";   // cap results — keeps response ~5KB vs ~60KB unbounded
-
-constexpr uint32_t POLL_INTERVAL_MS    = 60000;   // 60 s between full refresh cycles
-constexpr uint32_t INTER_REQUEST_MS    = 500;     // gap between sequential stop requests
+constexpr uint32_t POLL_INTERVAL_MS    = 60000;   // 60 s between NAS fetches
 
 // ---------------------------------------------------------------------------
 // WiFi / provisioning
@@ -78,6 +64,14 @@ constexpr bool    TIME_24HR_DEFAULT   = false;
 constexpr int HEADER_H   = 28;   // px — time + date bar
 constexpr int PANEL_W    = 160;  // px — each stop panel width
 constexpr int PANEL_H    = 106;  // px — each stop panel height
+
+// ---------------------------------------------------------------------------
+// NAS Server
+// ---------------------------------------------------------------------------
+constexpr const char* NAS_DEFAULT_URL = "http://192.168.1.100:8081";
+
+String getNasUrl();
+bool   setNasUrl(const String& url);
 
 // ---------------------------------------------------------------------------
 // OTA / network

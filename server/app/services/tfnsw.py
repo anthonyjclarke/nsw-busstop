@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
@@ -39,8 +40,59 @@ def _parse_iso_to_local(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(ZoneInfo(settings.timezone))
 
 
-def _format_delay(seconds: int) -> int:
-    return seconds
+async def _fetch_stop(client: httpx.AsyncClient, stop: StopConfig, now_local: datetime) -> StopState:
+    """Fetch departures for a single stop from TfNSW."""
+    params_url = f"{TFNSW_URL}&name_dm={stop.stop_id}"
+    response = await client.get(params_url)
+    response.raise_for_status()
+    payload = response.json()
+    stop_events = payload.get("stopEvents", [])
+
+    alert_text = ""
+    departures: list[Departure] = []
+
+    for event in stop_events:
+        infos = event.get("infos") or []
+        if infos and not alert_text:
+            alert_text = infos[0].get("subtitle", "") or ""
+
+        est = event.get("departureTimeEstimated")
+        planned = event.get("departureTimePlanned")
+        selected = est or planned
+        if not selected:
+            continue
+
+        dep_local = _parse_iso_to_local(selected)
+        mins = int((dep_local - now_local).total_seconds() // 60)
+        if mins < 0:
+            continue
+
+        planned_local = _parse_iso_to_local(planned) if planned else None
+        delay = int((dep_local - planned_local).total_seconds()) if planned_local and est else 0
+
+        departures.append(
+            Departure(
+                route=event.get("transportation", {}).get("number", ""),
+                clock=dep_local.strftime("%H:%M"),
+                minutes=mins,
+                epoch=int(dep_local.astimezone(UTC).timestamp()),
+                rt=bool(event.get("isRealtimeControlled", False)),
+                delay=delay,
+                dest=event.get("transportation", {}).get("destination", {}).get("name", ""),
+            )
+        )
+
+    departures.sort(key=lambda dep: dep.epoch)
+    departures = departures[:3]
+
+    return StopState(
+        id=stop.stop_id,
+        name=stop.name,
+        valid=bool(departures),
+        fetch_age=0,
+        alert=alert_text,
+        departures=departures,
+    )
 
 
 def _empty_payload(
@@ -77,64 +129,12 @@ async def fetch_state(stops: list[StopConfig]) -> FetchResult:
         return _empty_payload(stops, now_local, now_utc, tz_off, "TFNSW_API_KEY is not configured")
 
     headers = {"Authorization": f"apikey {settings.tfnsw_api_key}"}
-    stop_states: list[StopState] = []
 
     try:
         async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
-            for stop in stops:
-                params_url = f"{TFNSW_URL}&name_dm={stop.stop_id}"
-                response = await client.get(params_url)
-                response.raise_for_status()
-                payload = response.json()
-                stop_events = payload.get("stopEvents", [])
-
-                alert_text = ""
-                departures: list[Departure] = []
-
-                for event in stop_events:
-                    infos = event.get("infos") or []
-                    if infos and not alert_text:
-                        alert_text = infos[0].get("subtitle", "") or ""
-
-                    est = event.get("departureTimeEstimated")
-                    planned = event.get("departureTimePlanned")
-                    selected = est or planned
-                    if not selected:
-                        continue
-
-                    dep_local = _parse_iso_to_local(selected)
-                    mins = int((dep_local - now_local).total_seconds() // 60)
-                    if mins < 0:
-                        continue
-
-                    planned_local = _parse_iso_to_local(planned) if planned else None
-                    delay = int((dep_local - planned_local).total_seconds()) if planned_local and est else 0
-
-                    departures.append(
-                        Departure(
-                            route=event.get("transportation", {}).get("number", ""),
-                            clock=dep_local.strftime("%H:%M"),
-                            minutes=mins,
-                            epoch=int(dep_local.astimezone(UTC).timestamp()),
-                            rt=bool(event.get("isRealtimeControlled", False)),
-                            delay=_format_delay(delay),
-                            dest=event.get("transportation", {}).get("destination", {}).get("name", ""),
-                        )
-                    )
-
-                departures.sort(key=lambda dep: dep.epoch)
-                departures = departures[:3]
-
-                stop_states.append(
-                    StopState(
-                        id=stop.stop_id,
-                        name=stop.name,
-                        valid=bool(departures),
-                        fetch_age=0,
-                        alert=alert_text,
-                        departures=departures,
-                    )
-                )
+            stop_states = await asyncio.gather(
+                *[_fetch_stop(client, stop, now_local) for stop in stops]
+            )
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else None
         if status_code == 401:
@@ -152,7 +152,7 @@ async def fetch_state(stops: list[StopConfig]) -> FetchResult:
             tzOff=tz_off,
             lastRefresh=refreshed_at.isoformat(),
             lastError=None,
-            stops=stop_states,
+            stops=list(stop_states),
         ),
         refreshed_at=refreshed_at,
         error=None,

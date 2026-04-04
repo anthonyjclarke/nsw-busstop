@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,7 +22,27 @@ from app.services.stops import list_stops, replace_stops
 from app.services.tfnsw import fetch_state
 
 
-app = FastAPI(title="NSW BusStop Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    app.state.state_payload = AppStatePayload(
+        time="--:--:--",
+        date="--",
+        now=0,
+        tzOff=0,
+        lastRefresh=None,
+        lastError="Waiting for initial refresh",
+        stops=[],
+    )
+    app.state.last_error = None
+    app.state.last_refresh = None
+    await refresh_state()
+    poller_task = asyncio.create_task(poller())
+    yield
+    poller_task.cancel()
+
+
+app = FastAPI(title="NSW BusStop Server", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -89,30 +111,6 @@ async def poller() -> None:
             app.state.last_error = str(exc)
         await asyncio.sleep(settings.poll_interval_seconds)
 
-
-@app.on_event("startup")
-async def startup() -> None:
-    init_db()
-    app.state.state_payload = AppStatePayload(
-        time="--:--:--",
-        date="--",
-        now=0,
-        tzOff=0,
-        lastRefresh=None,
-        lastError="Waiting for initial refresh",
-        stops=[],
-    )
-    app.state.last_error = None
-    app.state.last_refresh = None
-    await refresh_state()
-    app.state.poller_task = asyncio.create_task(poller())
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    task = getattr(app.state, "poller_task", None)
-    if task:
-        task.cancel()
 
 
 @app.get("/health")

@@ -22,7 +22,7 @@ static void handleApiState(AsyncWebServerRequest* req) {
   // Recalculate minutes so the JSON always reflects current time
   recalcMinutes();
 
-  DynamicJsonDocument doc(3072);
+  StaticJsonDocument<3072> doc;
 
   doc["time"]  = getTimeStr();
   doc["date"]  = getDateStr();
@@ -64,7 +64,7 @@ static void handleApiState(AsyncWebServerRequest* req) {
 
 // GET /api/stops
 static void handleApiStops(AsyncWebServerRequest* req) {
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<1024> doc;
   JsonArray stops = doc.to<JsonArray>();
 
   for (uint8_t i = 0; i < STOP_COUNT; i++) {
@@ -79,7 +79,7 @@ static void handleApiStops(AsyncWebServerRequest* req) {
 }
 
 static void handleApiStopsUpdate(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  DynamicJsonDocument doc(2048);
+  StaticJsonDocument<2048> doc;
   DeserializationError err = deserializeJson(doc, data, len);
   if (err) {
     DBG_WARN("/api/stops POST JSON parse failed: %s", err.c_str());

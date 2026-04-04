@@ -14,8 +14,7 @@ The server must be running on your local network for this device to display any 
 Displays the next 3 bus departures for up to 4 NSW stops near Ryde/Putney on the
 CYD TFT display. Departure data is fetched from a local NAS server (Python FastAPI
 at `192.168.1.100:8081`) rather than calling TfNSW directly. Stop configuration is
-managed via the NAS dashboard. The device hosts a minimal config WebUI for adjusting
-the NAS URL, brightness, and triggering refreshes/reboots.
+managed via the NAS dashboard or the device's built-in WebUI stop editor.
 
 ## Target Hardware
 
@@ -43,7 +42,7 @@ Standard CYD pin assignments apply — see global CLAUDE.md.
 | Poll interval | 60 s                                      |
 | Auth          | Optional Bearer token via `SECRET_NAS_API_KEY` |
 
-NAS URL is editable at runtime via the device WebUI and persisted in NVS.
+NAS URL is editable at runtime via `setNasUrl()` and persisted in NVS.
 
 ## NAS JSON Schema (`/api/state`)
 
@@ -73,19 +72,18 @@ NAS URL is editable at runtime via the device WebUI and persisted in NVS.
 
 ## Module Structure
 
-| File                     | Purpose                                                     |
-|:-------------------------|:------------------------------------------------------------|
-| `src/main.cpp`           | setup(), loop(), init orchestration, bus refresh             |
-| `src/display.cpp/.h`     | All TFT drawing — header, panels, status bar                |
-| `src/bus_api.cpp/.h`     | NAS fetch, JSON parse, StopData/Departure structs           |
-| `src/time_mgr.cpp/.h`    | ezTime NTP init, time/date/day helpers, TZ offset           |
-| `src/web_server.cpp/.h`  | AsyncWebServer, LittleFS serve, device config API           |
-| `src/config.cpp`         | NAS URL: NVS load/save, `getNasUrl()` / `setNasUrl()`      |
-| `src/debug.cpp`          | `dbgTimestamp()` — wall-clock or uptime fallback prefix     |
-| `include/config.h`       | Tuneable constants + NAS config declarations                |
-| `include/debug.h`        | Levelled debug macros with wall-clock timestamps            |
-| `include/secrets.h`      | Gitignored — WiFi creds + NAS API key                       |
-| `data/www/index.html`    | Device config SPA — served from LittleFS                    |
+| File                     | Purpose                                              |
+|:-------------------------|:-----------------------------------------------------|
+| `src/main.cpp`           | setup(), loop(), init orchestration, bus refresh      |
+| `src/display.cpp/.h`     | All TFT drawing — header, panels, status bar         |
+| `src/bus_api.cpp/.h`     | NAS fetch, JSON parse, StopData/Departure structs    |
+| `src/time_mgr.cpp/.h`    | ezTime NTP init, time/date/day helpers, TZ offset    |
+| `src/web_server.cpp/.h`  | AsyncWebServer, PROGMEM WebUI, stop/state API        |
+| `src/config.cpp`         | Stop config + NAS URL: NVS load/save                 |
+| `src/debug.cpp`          | `dbgTimestamp()` — wall-clock or uptime fallback      |
+| `include/config.h`       | Tuneable constants + NAS config declarations         |
+| `include/debug.h`        | Levelled debug macros with wall-clock timestamps     |
+| `include/secrets.h`      | Gitignored — WiFi creds + NAS API key                |
 
 ## Key Data Structures (`bus_api.h`)
 
@@ -95,7 +93,6 @@ struct Departure {
   char   clockTime[6];     // local HH:MM from NAS
   char   destination[32];  // e.g. "Gladesville - Jordan St"
   time_t epochUTC;         // departure UTC epoch
-  time_t epochPlanned;     // epochUTC - delaySecs (0 if no delay)
   int    minutesUntil;     // refreshed by recalcMinutes() every 15s
   int    delaySecs;        // positive = late, negative = early
   bool   isRealtime;       // true = live GPS, false = scheduled
@@ -119,7 +116,7 @@ Using TFT_eSPI built-in fonts (requires `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FON
 - Font 2 (16px) — stop names, departure rows, status bar
 
 **Note:** This departs from the global CLAUDE.md VLW-only rule. Built-in fonts are
-used deliberately here to save flash space. Upgrade to VLW is a Phase 3 item.
+used deliberately here to save flash space.
 
 ## Display Layout
 
@@ -143,32 +140,31 @@ Footer: `upd HH:MM` — dim grey, bottom-right corner, updated on each NAS fetch
 | TFT clock header | 1 s      | ezTime `events()` + `drawHeader()`       |
 | TFT stop panels  | 15 s     | `recalcMinutes()` from stored epoch      |
 | NAS fetch        | 60 s     | `fetchAllStops()` — single HTTP GET      |
-| WebUI device poll| 10 s     | `fetch('/api/device')` from browser JS   |
-| NAS URL change   | on-demand| `consumeStopRefreshRequest()` in loop()  |
+| WebUI poll       | 15 s     | `fetch('/api/state')` from browser JS    |
+| Stop config edit | on-demand| `consumeStopRefreshRequest()` in loop()  |
 
 ## Device Web API Endpoints
 
-| Method | Path               | Description                                       |
-|:-------|:-------------------|:--------------------------------------------------|
-| GET    | `/`                | Device config SPA (served from LittleFS `/www/`)  |
-| GET    | `/api/device`      | JSON: IP, hostname, NAS URL, errors, heap, uptime |
-| GET    | `/api/state`       | Cached stop data (re-serialised, mirrors NAS schema) |
-| GET    | `/api/refresh`     | Queue immediate NAS fetch                         |
-| POST   | `/api/nas-url`     | Body: `{"url":"..."}` — persist + queue refresh   |
-| POST   | `/api/brightness`  | Body: `{"value":0-255}` — set backlight           |
-| POST   | `/api/reboot`      | Restart device                                    |
+| Method | Path               | Description                                     |
+|:-------|:-------------------|:------------------------------------------------|
+| GET    | `/`                | Bus departures WebUI (PROGMEM HTML + JS)        |
+| GET    | `/api/state`       | Cached stop data (re-serialised, mirrors NAS)   |
+| GET    | `/api/stops`       | Current stop ID/name array                      |
+| POST   | `/api/stops`       | Update stop list (JSON array) + queue refresh   |
+| POST   | `/api/stops/reset` | Restore default stops + queue refresh           |
+| GET    | `/mirror`          | Redirect to `/`                                 |
 
-## Device Config WebUI (`data/www/index.html`)
+## WebUI (`/`)
 
-Single-page dark-themed config interface served from LittleFS. **Not** a bus data
-dashboard — the WebUI is for device management only.
+PROGMEM-embedded dark-themed dashboard served by AsyncWebServer. Combines live bus
+departure display with a stop configuration editor.
 
 Features:
-- Device diagnostics: IP, hostname, heap, uptime, fetch age, errors
-- NAS URL editor with save + refresh trigger
-- Link to open NAS dashboard in new tab
-- Brightness slider (20-255)
-- Force refresh and reboot buttons
+- Live bus departures with real-time badges, delay pills, day labels
+- "Edit stops" toggle for modifying stop IDs and names
+- Save and reset buttons with status feedback
+- Auto-polls `/api/state` every 15s, re-renders every 5s
+- Link to raw JSON at `/api/state`
 
 ## Secrets (`include/secrets.h`)
 
@@ -195,9 +191,12 @@ ArduinoOTA is framework built-in (no lib_dep entry needed).
 
 ## Building & Flashing
 
-Two upload steps are required:
-1. **Firmware:** `pio run -t upload` (or `pio run -d client/ -t upload` from monorepo root)
-2. **Filesystem:** `pio run -t uploadfs` — uploads `data/www/` to LittleFS partition
+Firmware upload only (no filesystem upload needed — WebUI is PROGMEM-embedded):
+
+```sh
+pio run -t upload          # from client/
+pio run -d client/ -t upload   # from monorepo root
+```
 
 Upload speed: 230400 baud. Port: auto-detected by PlatformIO.
 Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
@@ -207,9 +206,9 @@ Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
 1. `initDisplay()` — TFT + backlight
 2. `initWiFi()` — WiFiManager with optional secrets.h seed
 3. `initTime()` — ezTime NTP sync (30s timeout)
-4. `initNasConfig()` — load NAS URL from NVS or use default
+4. `initStopConfig()` — load stops from NVS or use defaults
 5. `initBusApi()` — zero stop data arrays
-6. `initWebServer()` — LittleFS mount + AsyncWebServer routes
+6. `initWebServer()` — AsyncWebServer routes
 7. `initOTA()` — ArduinoOTA with status bar feedback
 8. First `performBusRefresh()` — fetch + draw
 9. Initial header draw + log free heap
@@ -221,10 +220,7 @@ Hostname after provisioning: `cyd-busstop` (mDNS + OTA).
 - `STOP_COUNT = 4` is the display slot maximum — NAS can have fewer; unused slots show "No data"
 - Stop names from NAS > 23 chars are silently truncated (`STOP_NAME_MAX = 24`)
 - NAS URL is stored in NVS namespace `busstop2` — differs from v1 `busstop` intentionally
+- Stop config is stored in NVS namespace `busstop` — separate from NAS URL
 - `fetchAllStops()` blocks loop() for ~50-200ms (LAN HTTP); acceptable vs v1's ~10s TLS
-- LittleFS `begin(true)` formats partition on first boot if blank — expected behaviour
-- Device WebUI brightness change is not persisted across reboots (intentional)
 - Built-in fonts require explicit `-DLOAD_GLCD=1 -DLOAD_FONT2=1 -DLOAD_FONT4=1` build flags
-- Vertical divider in `drawDividers()` draws 28px past screen bottom (length `240` should be `240 - HEADER_H`)
 - `handleWebServer()` is a no-op — AsyncWebServer is fully event-driven, but the call is kept for future use
-- `DynamicJsonDocument` is used in several handlers — could be `StaticJsonDocument` for less fragmentation

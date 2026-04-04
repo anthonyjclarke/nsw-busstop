@@ -57,8 +57,8 @@ Changes to this schema must be coordinated across both components.
 |:-------------------|:----------------------------------|:----------------------------|
 | TfNSW API key      | `server/.env` (NAS only)          | TfNSW departure API access  |
 | NAS auth creds     | `server/.env` (NAS only)          | Dashboard login             |
+| NAS API key        | `server/.env` + `client/secrets.h`| Bearer token for `/api/state` |
 | WiFi credentials   | `client/include/secrets.h`        | WiFiManager seed            |
-| NAS API key        | `client/include/secrets.h`        | Bearer token for `/api/state` |
 
 Both `.env` and `secrets.h` are gitignored. Templates: `server/.env.example` and
 `client/include/secrets.h.example`.
