@@ -10,8 +10,8 @@ constexpr uint8_t     DEPARTURES_PER_STOP = 3;  // Fixed ESP32 cache + TFT rows
 constexpr uint8_t     WEBUI_DEPARTURES_MIN = 1;
 constexpr uint8_t     WEBUI_DEPARTURES_MAX = 8;
 
-constexpr uint8_t STOP_ID_MAX   = 16;
-constexpr uint8_t STOP_NAME_MAX = 24;
+constexpr uint8_t STOP_ID_MAX   = 33;  // includes NUL; server allows up to 32 chars
+constexpr uint8_t STOP_NAME_MAX = 65;  // includes NUL; server allows up to 64 chars
 
 constexpr const char* const STOP_IDS_DEFAULT[STOP_COUNT] = {
   "2112130",  // To Gladesville

@@ -74,6 +74,14 @@ bool fetchAllStops() {
     return false;
   }
 
+  const char* lastError = doc["lastError"];
+  if (lastError && strlen(lastError) > 0) {
+    DBG_WARN("NAS state error: %s", lastError);
+    // Preserve the last good cache instead of blanking the TFT when the NAS
+    // can still answer but upstream TfNSW is rate-limiting or otherwise failing.
+    return false;
+  }
+
   // Clear existing data
   memset(stopData, 0, sizeof(stopData));
 
@@ -94,12 +102,13 @@ bool fetchAllStops() {
     }
 
     StopData& sd = stopData[idx];
-    sd.valid = stop["valid"] | true;  // default true if missing
     sd.lastFetchMs = millis();
 
     // Parse departures
     JsonArray deps = stop["departures"];
-    sd.count = min((size_t)DEPARTURES_PER_STOP, deps.size());
+    sd.count = deps.isNull() ? 0 : min((size_t)DEPARTURES_PER_STOP, deps.size());
+    JsonVariantConst stopValid = stop["valid"];
+    sd.valid = stopValid.isNull() ? (sd.count > 0) : stopValid.as<bool>();
 
     for (uint8_t j = 0; j < sd.count; j++) {
       JsonObject dep = deps[j];
@@ -132,7 +141,7 @@ bool fetchAllStops() {
     idx++;
   }
 
-  DBG_INFO("NAS fetch complete: %d stops updated", stops.size());
+  DBG_INFO("NAS fetch complete: %u/%u stops updated", idx, (unsigned)stops.size());
   return true;
 }
 

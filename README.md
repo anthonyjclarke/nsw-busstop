@@ -1,7 +1,7 @@
 # NSW BusStop
 
 A real-time Sydney bus departure display system built around the **Transport for
-NSW Trip Planner API**. A small FastAPI server polls TfNSW every 60 seconds and
+NSW Trip Planner API**. A small FastAPI server polls TfNSW every 90 seconds and
 serves a normalised JSON feed to an ESP32 CYD (Cheap Yellow Display) that shows
 the next three departures for four configured stops on its TFT screen, while
 the server WebUI can be configured to show 1 to 8 departures per stop.
@@ -27,7 +27,7 @@ the server. The ESP32 just fetches pre-processed JSON and renders it.
 ![Client TFT display](images/client-cyd-screenshot.png)
 
 2x2 stop layout on the CYD 2.8" screen: time/date header, per-stop departures
-with real-time/scheduled indicators, footer server-status dot and `upd HH:MM`.
+with compact `LIVE` / `SCH` labels, footer server-status dot and `upd HH:MM`.
 
 ### Client device dashboard (mirror)
 
@@ -63,11 +63,12 @@ server.
   service-alert subtitles
 - **Day-aware display** — "Now", `5m`, `1h5m`, or a 3-letter day abbreviation
   (`Mon`, `Tue`, …) for non-today departures
-- **Real-time vs scheduled** — green dot for GPS-tracked buses, grey tilde for
-  scheduled-only
+- **Real-time vs scheduled** — compact `LIVE` / `SCH` labels on the TFT and
+  badges on the WebUI
 - **Resilient cached display** — cached departures keep counting down locally
-  when the server is briefly unreachable; TFT footer shows a red dot when the
-  last poll failed
+  when the server is briefly unreachable or the NAS reports upstream TfNSW
+  errors such as rate limiting; TFT footer shows a red dot when the last poll
+  failed
 - **Server-side stop management** — edit the configured stops from the server
   dashboard; the ESP32 mirrors the list on its next poll
 - **Configurable server WebUI rows** — choose 1 to 8 departures per stop on
@@ -208,7 +209,7 @@ APP_PASSWORD=your-secure-password
 SESSION_SECRET=a-long-random-string
 NAS_API_KEY=
 TIMEZONE=Australia/Sydney
-POLL_INTERVAL_SECONDS=60
+POLL_INTERVAL_SECONDS=90
 PORT=8081
 ```
 
@@ -282,7 +283,7 @@ docker volume rm nsw-busstop-data
 | `SESSION_SECRET`        | Yes\*    | —                  | Cookie signing secret         |
 | `NAS_API_KEY`           | No       | (empty)            | Bearer token for ESP32 client |
 | `TIMEZONE`              | No       | `Australia/Sydney` | Display timezone              |
-| `POLL_INTERVAL_SECONDS` | No       | `60`               | TfNSW fetch interval          |
+| `POLL_INTERVAL_SECONDS` | No       | `90`               | TfNSW fetch interval          |
 | `PORT`                  | No       | `8081`             | Server port                   |
 
 \* Required when `AUTH_ENABLED=true`.

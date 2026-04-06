@@ -20,6 +20,7 @@
 #define COL_TIME_FG   TFT_WHITE
 #define COL_MINS_NEAR TFT_GREEN    // < 10 min
 #define COL_MINS_FAR  TFT_YELLOW   // >= 10 min
+#define COL_ALERT     TFT_ORANGE
 #define COL_DIVIDER   0x2104       // dark grey (RGB565)
 #define COL_STATUS_BG 0x2104
 
@@ -33,15 +34,50 @@ static const int PANEL_X[4] = { 0,      PANEL_W, 0,      PANEL_W };
 static const int PANEL_Y[4] = { HEADER_H, HEADER_H,
                                  HEADER_H + PANEL_H, HEADER_H + PANEL_H };
 
-#define ROW_NAME_H  18   // px — stop name row height
-#define ROW_DEP_H   26   // px — each departure row
+#define ROW_NAME_H  16   // px — compact stop name band
+#define ROW_DEP_H   22   // px — tightened row pitch for 3 departures
 #define PAD_X        4   // px — left padding inside panel
+#define ALERT_DOT_R  3   // px — subtle service-alert indicator
+#define BADGE_X     30   // px — compact realtime/scheduled badge anchor
+#define MINS_X      68   // px — minutes label anchor after badge
+#define BADGE_FONT   1   // smaller built-in font for compact status labels
+#define BADGE_Y_OFF  4   // vertically centre the smaller badge in the row
 
 TFT_eSPI tft = TFT_eSPI();
 
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------
+
+static void fitPanelText(const char* text, char* buf, size_t bufLen, int maxWidth, int font) {
+  if (bufLen == 0) return;
+  if (text == nullptr) {
+    buf[0] = '\0';
+    return;
+  }
+
+  strncpy(buf, text, bufLen - 1);
+  buf[bufLen - 1] = '\0';
+
+  if (tft.textWidth(buf, font) <= maxWidth) {
+    return;
+  }
+
+  size_t len = strlen(buf);
+  while (len > 0) {
+    if (len > 3) {
+      buf[len - 1] = '\0';
+      len--;
+      strcpy(&buf[len - 3], "...");
+    } else {
+      buf[0] = '\0';
+    }
+
+    if (tft.textWidth(buf, font) <= maxWidth || buf[0] == '\0') {
+      return;
+    }
+  }
+}
 
 static void drawDividers() {
   tft.drawFastHLine(0,      HEADER_H - 1,        320, COL_DIVIDER);  // below header
@@ -90,11 +126,18 @@ void drawStopPanel(uint8_t idx) {
 
   tft.fillRect(px, py, PANEL_W - 1, PANEL_H - 1, COL_BG);
 
+  const StopData& sd = stopData[idx];
+
   // Stop name — Font 2, cyan
   tft.setTextColor(COL_STOP_NAME, COL_BG);
-  tft.drawString(stopNames[idx], px + PAD_X, py + 2, 2);
+  char stopLabel[STOP_NAME_MAX];
+  int titleMaxWidth = PANEL_W - (PAD_X * 2) - (sd.hasAlerts ? 12 : 0);
+  fitPanelText(stopNames[idx], stopLabel, sizeof(stopLabel), titleMaxWidth, 2);
+  tft.drawString(stopLabel, px + PAD_X, py + 2, 2);
 
-  const StopData& sd = stopData[idx];
+  if (sd.hasAlerts) {
+    tft.fillCircle(px + PANEL_W - 10, py + 8, ALERT_DOT_R, COL_ALERT);
+  }
 
   if (!sd.valid || sd.count == 0) {
     tft.setTextColor(TFT_DARKGREY, COL_BG);
@@ -105,17 +148,19 @@ void drawStopPanel(uint8_t idx) {
   for (uint8_t i = 0; i < sd.count && i < DEPARTURES_PER_STOP; i++) {
     const Departure& dep = sd.departures[i];
     int rowY = py + ROW_NAME_H + (i * ROW_DEP_H) + 4;
+    int clockRightX = px + PANEL_W - PAD_X - 2;
 
     // Route number
     tft.setTextColor(COL_ROUTE, COL_BG);
     tft.drawString(dep.route, px + PAD_X, rowY, 2);
 
-    // Real-time indicator: filled circle (green) = live, tilde (grey) = scheduled
+    // Compact text badge matches the WebUI better than a dot/tilde marker.
     if (dep.isRealtime) {
-      tft.fillCircle(px + PAD_X + 36, rowY + 7, 3, COL_MINS_NEAR);
+      tft.setTextColor(COL_MINS_NEAR, COL_BG);
+      tft.drawString("LIVE", px + BADGE_X, rowY + BADGE_Y_OFF, BADGE_FONT);
     } else {
       tft.setTextColor(TFT_DARKGREY, COL_BG);
-      tft.drawString("~", px + PAD_X + 33, rowY, 2);
+      tft.drawString("SCH", px + BADGE_X, rowY + BADGE_Y_OFF, BADGE_FONT);
     }
 
     // Minutes until — colour-coded; day abbreviation for non-today departures
@@ -133,11 +178,11 @@ void drawStopPanel(uint8_t idx) {
       snprintf(minsStr, sizeof(minsStr), "%dm", dep.minutesUntil);
       tft.setTextColor((dep.minutesUntil < 10) ? COL_MINS_NEAR : COL_MINS_FAR, COL_BG);
     }
-    tft.drawString(minsStr, px + PAD_X + 46, rowY, 2);
+    tft.drawString(minsStr, px + MINS_X, rowY, 2);
 
     // Clock time
-    tft.setTextColor(COL_TIME_FG, COL_BG);
-    tft.drawString(dep.clockTime, px + PAD_X + 92, rowY, 2);
+    tft.setTextColor(COL_DATE_FG, COL_BG);
+    tft.drawRightString(dep.clockTime, clockRightX, rowY, 2);
   }
 }
 

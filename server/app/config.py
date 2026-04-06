@@ -23,7 +23,7 @@ class Settings:
     app_password: str = os.getenv("APP_PASSWORD", "change-me")
     session_secret: str = os.getenv("SESSION_SECRET", "change-this-session-secret")
     timezone: str = os.getenv("TIMEZONE", "Australia/Sydney")
-    poll_interval_seconds: int = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+    poll_interval_seconds: int = int(os.getenv("POLL_INTERVAL_SECONDS", "90"))
     port: int = int(os.getenv("PORT", "8081"))
     auth_enabled: bool = os.getenv("AUTH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     nas_api_key: str = os.getenv("NAS_API_KEY", "")

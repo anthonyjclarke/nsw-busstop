@@ -50,9 +50,11 @@ docker compose up -d --build
 
 TfNSW Departure Monitor: `https://api.transport.nsw.gov.au/v1/tp/departure_mon`
 - Auth: `Authorization: apikey {TFNSW_API_KEY}` header
-- Polls every `POLL_INTERVAL_SECONDS` (default 60s) in a background async task
+- Polls every `POLL_INTERVAL_SECONDS` (default 90s) in a background async task
 - Extracts route number, destination, estimated/planned time, delay
 - 20-second timeout per request
+- Default 90s interval is chosen to reduce TfNSW `HTTP 429` rate limiting
+  while keeping minute-based departures useful for the client display
 
 ## Environment Variables
 
