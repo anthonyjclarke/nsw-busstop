@@ -10,6 +10,30 @@ Format: `## [version] YYYY-MM-DD` — sections: Added · Changed · Fixed.
 
 ---
 
+## [0.6.1] 2026-04-06
+
+### Added
+- Subtle TFT stop-alert indicator: panels now show a small orange dot beside
+  the stop name when the NAS reports service alerts for that stop.
+
+### Changed
+- TFT row layout tightened while staying at 3 departures per stop: smaller
+  stop-name band, reduced row pitch, right-aligned clock column, and compact
+  `LIVE` / `SCH` status labels to improve scanability on the 160px panels.
+- Client docs updated to reflect the 90-second default TfNSW poll interval on
+  the NAS server and the current TFT layout behaviour.
+
+### Fixed
+- NAS upstream-error handling: when `/api/state` includes `lastError` (for
+  example TfNSW `HTTP 429` rate limiting), the client now preserves the last
+  good stop cache instead of clearing the TFT to empty panels.
+- Server/client stop-name length mismatch: local stop ID/name buffers now match
+  the server contract so longer NAS-managed names no longer get rejected.
+- TFT stop names are now ellipsized to fit the panel width cleanly instead of
+  overrunning the title row.
+- NAS `valid` parsing now respects the payload value or falls back to whether
+  departures were present, instead of defaulting every stop to valid.
+
 ## [0.6.0] 2026-04-05
 
 ### Added

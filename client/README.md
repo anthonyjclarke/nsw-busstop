@@ -34,8 +34,14 @@ guide, see the [top-level README](../README.md).
 cp include/secrets.h.example include/secrets.h
 ```
 
-Edit `include/secrets.h` with your WiFi credentials and (optionally) a NAS API
-key matching the server's `NAS_API_KEY`.
+`include/secrets.h` is a local-only file and is intentionally gitignored, so it
+will not appear when you clone or pull this repo on a new machine. Create it
+from `include/secrets.h.example` on each machine that builds or flashes the
+client.
+
+Edit `include/secrets.h` with your WiFi credentials if you want to pre-fill the
+WiFiManager portal, and set `SECRET_NAS_API_KEY` only when the server requires
+API authentication.
 
 ### 2. Build and flash
 
@@ -112,11 +118,15 @@ client/
 
 Landscape 320x240. Header bar with time and date, then a 2x2 grid of stop
 panels. Each panel shows the stop name and up to 3 departure rows with route
-number, real-time indicator, countdown, and clock time.
+number, compact `LIVE` / `SCH` status label, countdown, and a right-aligned
+clock time. Rows are intentionally tightened to improve density without adding
+more than 3 departures per stop.
 
 Footer shows `Server Status` with a status dot (green = NAS reachable, red =
-last poll failed) and `upd HH:MM` on the right. Cached countdowns continue
-aging locally between successful polls.
+last poll failed) and `upd HH:MM` on the right. A small orange dot appears
+beside the stop name when alerts are active. Cached countdowns continue aging
+locally between successful polls, and the last good cache is preserved when
+the NAS reports upstream TfNSW errors such as `HTTP 429`.
 
 The stop list comes from the NAS `/api/state` response order; the client no
 longer offers local stop editing — configure stops on the server dashboard.
@@ -163,7 +173,7 @@ All debug output is prefixed with wall-clock time after NTP sync, or uptime
 ```text
 [15:05:24] [INFO]  Fetching from NAS: http://192.168.1.100:8081/api/state
 [15:05:24] [INFO]  NAS response: 2014 bytes, heap: 210356
-[15:05:24] [INFO]  NAS fetch complete: 4 stops updated
+[15:05:24] [INFO]  NAS fetch complete: 4/4 stops updated
 ```
 
 ---

@@ -39,7 +39,7 @@ Standard CYD pin assignments apply — see global CLAUDE.md.
 | Default URL   | `http://192.168.1.100:8081`               |
 | NVS key       | `nasUrl` in namespace `busstop2`          |
 | Endpoint      | `GET /api/state` -> JSON payload          |
-| Poll interval | 60 s                                      |
+| Poll interval | 90 s                                      |
 | Auth          | Optional Bearer token via `SECRET_NAS_API_KEY` |
 
 NAS URL is editable at runtime via `setNasUrl()` and persisted in NVS.
@@ -123,7 +123,9 @@ used deliberately here to save flash space.
 Landscape 320x240. Header 28px, then 2x2 grid of stop panels (160x106 each).
 
 Each panel: stop name (cyan) + up to 3 departure rows.
-Each row: route (white), real-time indicator (filled circle=green/`~`=grey), minutes or day abbr, clock time.
+Each row: route (white), compact `LIVE`/`SCH` label, minutes or day abbr,
+right-aligned clock time. Stop names are ellipsized when needed. A small
+orange dot beside the stop name indicates active alerts.
 
 Minutes display logic:
 - `<=0`: "Now" (orange)
@@ -133,6 +135,10 @@ Minutes display logic:
 
 Footer: `Server Status` label with a green/red dot beside it, `upd HH:MM` on the
 right, updated after each NAS fetch attempt.
+
+If the NAS responds with a non-empty `lastError` (for example TfNSW `HTTP 429`
+rate limiting), the client preserves the last good TFT cache instead of
+blanking the display.
 
 ## Refresh Strategy
 
@@ -173,11 +179,14 @@ assets — all HTML/CSS/JS is compiled into flash.
 
 ## Secrets (`include/secrets.h`)
 
-Gitignored. Template at `include/secrets.h.example`. Three defines required:
+Gitignored and never committed. Template at `include/secrets.h.example`.
+Create this file locally on each machine that builds or flashes the client.
+`SECRET_WIFI_SSID` and `SECRET_WIFI_PASS` are optional WiFiManager seed values.
+`SECRET_NAS_API_KEY` is only needed when the server has auth enabled.
 
 ```cpp
-#define SECRET_WIFI_SSID    "your-ssid"
-#define SECRET_WIFI_PASS    "your-password"
+#define SECRET_WIFI_SSID    ""   // Optional: pre-fill WiFiManager
+#define SECRET_WIFI_PASS    ""   // Optional: pre-fill WiFiManager
 #define SECRET_NAS_API_KEY  ""   // Bearer token for NAS auth (empty = no auth)
 ```
 

@@ -40,7 +40,7 @@ APP_PASSWORD=your-password
 SESSION_SECRET=a-long-random-string
 NAS_API_KEY=
 TIMEZONE=Australia/Sydney
-POLL_INTERVAL_SECONDS=60
+POLL_INTERVAL_SECONDS=90
 PORT=8081
 ```
 
@@ -54,6 +54,8 @@ confirm what the running container is actually using.
 The dashboard's rows-per-stop display setting is persisted in SQLite and can be
 set from 1 to 8 without changing the ESP32 feed, which remains fixed at 3
 departures per stop.
+The default `POLL_INTERVAL_SECONDS=90` is a compromise to reduce TfNSW
+rate-limit (`HTTP 429`) risk while keeping minute-based departures useful.
 
 ---
 

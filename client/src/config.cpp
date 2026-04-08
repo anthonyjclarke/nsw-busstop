@@ -22,6 +22,7 @@ bool setStopConfig(uint8_t idx, const char* stopId, const char* stopName) {
     return false;
   }
   if (strlen(stopId) >= STOP_ID_MAX || strlen(stopName) >= STOP_NAME_MAX) {
+    DBG_WARN("Stop config[%u]: id/name too long for local buffers", idx);
     return false;
   }
 
