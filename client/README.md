@@ -34,8 +34,14 @@ guide, see the [top-level README](../README.md).
 cp include/secrets.h.example include/secrets.h
 ```
 
-Edit `include/secrets.h` with your WiFi credentials and (optionally) a NAS API
-key matching the server's `NAS_API_KEY`.
+`include/secrets.h` is a local-only file and is intentionally gitignored, so it
+will not appear when you clone or pull this repo on a new machine. Create it
+from `include/secrets.h.example` on each machine that builds or flashes the
+client.
+
+Edit `include/secrets.h` with your WiFi credentials if you want to pre-fill the
+WiFiManager portal, and set `SECRET_NAS_API_KEY` only when the server requires
+API authentication.
 
 ### 2. Build and flash
 

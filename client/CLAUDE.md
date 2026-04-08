@@ -179,11 +179,14 @@ assets — all HTML/CSS/JS is compiled into flash.
 
 ## Secrets (`include/secrets.h`)
 
-Gitignored. Template at `include/secrets.h.example`. Three defines required:
+Gitignored and never committed. Template at `include/secrets.h.example`.
+Create this file locally on each machine that builds or flashes the client.
+`SECRET_WIFI_SSID` and `SECRET_WIFI_PASS` are optional WiFiManager seed values.
+`SECRET_NAS_API_KEY` is only needed when the server has auth enabled.
 
 ```cpp
-#define SECRET_WIFI_SSID    "your-ssid"
-#define SECRET_WIFI_PASS    "your-password"
+#define SECRET_WIFI_SSID    ""   // Optional: pre-fill WiFiManager
+#define SECRET_WIFI_PASS    ""   // Optional: pre-fill WiFiManager
 #define SECRET_NAS_API_KEY  ""   // Bearer token for NAS auth (empty = no auth)
 ```
 
